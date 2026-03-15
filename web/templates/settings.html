@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Réglages Robot</title>
+    <style>
+        body { font-family: sans-serif; background: #222; color: #eee; padding: 20px; }
+        .container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .panel { background: #333; padding: 15px; border-radius: 8px; flex: 1; min-width: 300px; }
+        .video-box { width: 100%; aspect-ratio: 16/9; background: #000; overflow: hidden; display:flex; align-items:center; justify-content:center; margin-bottom: 10px; }
+        img.stream { width: 100%; }
+        button { background: #007bff; border: none; color: white; padding: 10px; margin: 3px; border-radius: 4px; cursor: pointer; }
+        
+        /* Grille de calibrage */
+        .calib-grid { display: grid; grid-template-columns: repeat(10, 30px); gap: 2px; }
+        .calib-cell { width: 30px; height: 30px; display: flex; justify-content: center; align-items: center; font-size: 10px; border: 1px solid #555; cursor: pointer; }
+        .calib-cell:hover { background: #555; }
+        .zone-b { background: #003366; } .zone-w { background: #004400; } .zone-board { background: #777; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Réglages Matériel</h1>
+    <a href="/" style="color:white; font-size:1.2em;">⬅️ Retour au Jeu</a>
+    <hr>
+    <div class="container">
+        <div class="panel">
+            <h2>Vision & Intelligence</h2>
+            <div style="display:flex; gap:10px; flex-direction: column;">
+                <div style="flex:1">
+                    <h4>Flux Caméra Standard</h4>
+                    <div class="video-box"><img src="/video_feed" class="stream"></div>
+                </div>
+                <div style="flex:1">
+                    <h4>Identification des Pièces (Vision AI)</h4>
+                    <div class="video-box"><img src="/video_feed/vision" class="stream" style="border: 2px solid #00FF00;"></div>
+                    <p style="font-size: 0.9em; color: #aaa;">Note: Le flux Vision affiche le plateau redressé avec les étiquettes des pièces détectées.</p>
+                </div>
+            </div>
+        </div>
+        <div class="panel">
+            <h2>Calibrage Manuel</h2>
+            <button style="background:#dc3545" onclick="sendCmd('/cmd/home', {})">🏠 HOME</button>
+            <br>
+            Z: <button onclick="jog('z', 10)">+10</button> <button onclick="jog('z', -10)">-10</button>
+            X: <button onclick="jog('x', 10)">+10</button> <button onclick="jog('x', -10)">-10</button>
+            Y: <button onclick="jog('y', 10)">+10</button> <button onclick="jog('y', -10)">-10</button>
+            <hr>
+            Aimant: <button style="background:#6c757d" id="magBtn" onclick="toggleMagnet()">Allumer 🧲</button>
+            <hr>
+            Bouton Validation: <span id="btnStatus" style="padding:5px; border-radius:4px; background:#444;">Vérification...</span>
+            <hr>
+            <h3>Grille 10x10 (Cliquer pour déplacer)</h3>
+            <div class="calib-grid" id="grid"></div>
+        </div>
+    </div>
+    <script>
+        function sendCmd(ep, d) { fetch(ep, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}); }
+        function jog(a, d) { sendCmd('/cmd/move_manual', {axis: a, dist: d}); }
+        function gotoCoords(x, y) { if(confirm("Aller en X="+x+" Y="+y+"?")) sendCmd('/cmd/goto_coords', {x:x, y:y}); }
+        
+        let magOn = false;
+        function toggleMagnet() {
+            magOn = !magOn;
+            const btn = document.getElementById('magBtn');
+            btn.innerText = magOn ? "Éteindre 🧲" : "Allumer 🧲";
+            btn.style.background = magOn ? "#28a745" : "#6c757d";
+            sendCmd('/api/magnet', {state: magOn});
+        }
+
+        const grid = document.getElementById('grid');
+        const size = 20; // 20mm
+        // 10 colonnes (0..9) x 10 lignes (0..9)
+        // Col 0 = Zone Noire, Col 9 = Zone Blanche, Col 1-8 = Plateau
+        for(let r=9; r>=0; r--) {
+            for(let c=0; c<10; c++) {
+                let d = document.createElement('div');
+                d.className = 'calib-cell';
+                d.innerText = `${c},${r}`;
+                
+                if(c===0) d.classList.add('zone-b');
+                else if(c===9) d.classList.add('zone-w');
+                else d.classList.add('zone-board');
+
+                // Centre de la case
+                let cx = (c * size) + (size/2);
+                let cy = (r * size) + (size/2);
+                
+                d.onclick = () => gotoCoords(cx, cy);
+                grid.appendChild(d);
+            }
+        }
+
+        // Boucle de mise à jour du statut bouton
+        function updateBtnStatus() {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    const span = document.getElementById('btnStatus');
+                    if(data.button_state) {
+                        span.innerText = "Bouton: APPUYÉ ✅";
+                        span.style.background = "#28a745";
+                    } else {
+                        span.innerText = "Bouton: RELACHÉ";
+                        span.style.background = "#444";
+                    }
+                })
+                .catch(() => {});
+        }
+        setInterval(updateBtnStatus, 1000);
+    </script>
+</body>
+</html>
