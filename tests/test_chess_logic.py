@@ -37,7 +37,7 @@ class TestChessLogic(unittest.TestCase):
         success = self.engine.push_uci('e2e5') # Pion trop loin
         self.assertFalse(success)
         
-        success = self.engine.push_uci('b1c3') # Pion bloque le cavalier
+        success = self.engine.push_uci('a1a3') # Pion a2 bloque la tour
         self.assertFalse(success)
 
     def test_checkmate_detection(self):

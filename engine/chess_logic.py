@@ -17,7 +17,7 @@ class ChessEngine:
         self.last_tick = time.time()
         self.clock_running = False
 
- 	# --- Compteurs de Dames de réserve utilisées ---
+        # --- Compteurs de Dames de réserve utilisées ---
         self.used_white_queens = 0
         self.used_black_queens = 0
 
@@ -50,10 +50,28 @@ class ChessEngine:
         self.clock_running = False
 
     def set_elo(self, elo):
-        if self.engine:
-            try:
-                self.engine.configure({"UCI_LimitStrength": True, "UCI_Elo": int(elo)})
-            except: pass
+        """
+        Règle la force de Stockfish. UCI_Elo a un minimum (1350 sur Stockfish 14) :
+        en dessous, on passe par 'Skill Level' (0-20), sinon Stockfish jouerait à pleine force.
+        """
+        if not self.engine:
+            return
+        elo = int(elo)
+        opts = self.engine.options
+        try:
+            elo_min = opts["UCI_Elo"].min if "UCI_Elo" in opts else 1350
+            if elo >= elo_min:
+                cfg = {"UCI_LimitStrength": True, "UCI_Elo": min(elo, opts["UCI_Elo"].max)}
+                if "Skill Level" in opts:
+                    cfg["Skill Level"] = 20
+            else:
+                # 100 Elo → niveau 0 … juste sous le minimum UCI_Elo → niveau 5
+                skill = round(5 * max(0, elo - 100) / max(1, elo_min - 100))
+                cfg = {"UCI_LimitStrength": False, "Skill Level": max(0, min(5, skill))}
+            self.engine.configure(cfg)
+            print(f"[IA] Force réglée : Elo demandé {elo} → {cfg}")
+        except Exception as e:
+            print(f"[ERREUR] Réglage Elo impossible : {e}")
 
     def reset(self):
         self.board.reset()

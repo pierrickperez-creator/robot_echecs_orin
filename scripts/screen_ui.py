@@ -10,6 +10,8 @@ from PIL import Image, ImageTk
 # Configuration
 API_BASE_URL = "http://localhost:5000"
 UPDATE_MS = 500
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DEFAULT_ELO  # Rafraîchissement toutes les 500ms
 
 class ChessRobotUI(tk.Tk):

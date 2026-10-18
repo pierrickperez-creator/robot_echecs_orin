@@ -48,8 +48,6 @@ gcode_log_buffer = []
 status_msg = "En attente du joueur Blanc..."
 clock_enabled = True
 last_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
-cap_w = 0   # pièces blanches capturées (index cimetière)
-cap_b = 0   # pièces noires capturées (index cimetière)
 
 # =============================================================================
 # LOGIQUE MATÉRIEL (MOTEURS & AIMANT)
@@ -331,122 +329,15 @@ sim_lock  = threading.Lock()
 # ACTIONS PHYSIQUES (MOUVEMENTS DE PIÈCES)
 # =============================================================================
 
-def execute_move_sequence(uci_move):
-    """
-    Exécute la séquence physique complète pour un coup UCI (ex: 'e2e4').
-    Gère la capture, la promotion (Dame), et le roque simplifié.
-    """
-    global status_msg, cap_w, cap_b
-    import chess as chess_lib
-
-    board = game_engine.board
-    move = chess_lib.Move.from_uci(uci_move)
-
-    src_sq = uci_move[:2]
-    dst_sq = uci_move[2:4]
-    src_x, src_y = calculate_xy(src_sq)
-    dst_x, dst_y = calculate_xy(dst_sq)
-
-    # Détection de prise
-    captured_piece = board.piece_at(chess_lib.parse_square(dst_sq))
-    is_capture = captured_piece is not None
-
-    # Détection en passant
-    is_en_passant = board.is_en_passant(move)
-
-    # --- 1. Prise : déplacer la pièce capturée au cimetière ---
-    if is_capture:
-        status_msg = f"Capture de {dst_sq}..."
-        graveyard = config.WHITE_GRAVEYARD if captured_piece.color == chess_lib.WHITE else config.BLACK_GRAVEYARD
-        used = cap_w if captured_piece.color == chess_lib.WHITE else cap_b
-        gx, gy = graveyard[min(used, len(graveyard) - 1)]
-        move_xyz(dst_x, dst_y, config.Z_BOARD)
-        magnet(True)
-        move_xyz(dst_x, dst_y, config.Z_PICK_REL)
-        move_xyz(gx, gy, config.Z_PICK_REL)
-        move_xyz(gx, gy, config.Z_BOARD)
-        magnet(False)
-        move_xyz(gx, gy, config.Z_TRAVEL_REL)
-        if captured_piece.color == chess_lib.WHITE:
-            cap_w += 1
-        else:
-            cap_b += 1
-
-    elif is_en_passant:
-        # Pion capturé en passant (case différente de dst)
-        ep_col = ord(dst_sq[0]) - ord('a')
-        ep_row = int(src_sq[1]) - 1  # Même rangée que la source
-        ep_x = config.BOARD_OFFSET_X + ep_col * config.SQUARE_SIZE_MM + config.SQUARE_SIZE_MM / 2
-        ep_y = config.BOARD_OFFSET_Y + ep_row * config.SQUARE_SIZE_MM + config.SQUARE_SIZE_MM / 2
-        graveyard = config.BLACK_GRAVEYARD if board.turn == chess_lib.WHITE else config.WHITE_GRAVEYARD
-        used = cap_b if board.turn == chess_lib.WHITE else cap_w
-        gx, gy = graveyard[min(used, len(graveyard) - 1)]
-        move_xyz(ep_x, ep_y, config.Z_BOARD)
-        magnet(True)
-        move_xyz(ep_x, ep_y, config.Z_PICK_REL)
-        move_xyz(gx, gy, config.Z_PICK_REL)
-        move_xyz(gx, gy, config.Z_BOARD)
-        magnet(False)
-        move_xyz(gx, gy, config.Z_TRAVEL_REL)
-        if board.turn == chess_lib.WHITE:
-            cap_b += 1
-        else:
-            cap_w += 1
-
-    # --- 2. Déplacer la pièce principale ---
-    status_msg = f"Déplacement {src_sq} → {dst_sq}..."
-    move_xyz(src_x, src_y, config.Z_BOARD)
-    magnet(True)
-    move_xyz(src_x, src_y, config.Z_PICK_REL)
-    move_xyz(dst_x, dst_y, config.Z_PICK_REL)
-    move_xyz(dst_x, dst_y, config.Z_BOARD)
-    magnet(False)
-    move_xyz(dst_x, dst_y, config.Z_TRAVEL_REL)
-
-    # --- 3. Roque : déplacer la tour ---
-    if board.is_castling(move):
-        if chess_lib.square_file(move.to_square) == 6:  # Petit roque (côté roi)
-            rook_src = dst_sq[0].replace(dst_sq[0], 'h') + dst_sq[1]
-            rook_dst = 'f' + dst_sq[1]
-        else:  # Grand roque (côté dame)
-            rook_src = 'a' + dst_sq[1]
-            rook_dst = 'd' + dst_sq[1]
-        rx1, ry1 = calculate_xy(rook_src)
-        rx2, ry2 = calculate_xy(rook_dst)
-        move_xyz(rx1, ry1, config.Z_BOARD)
-        magnet(True)
-        move_xyz(rx1, ry1, config.Z_PICK_REL)
-        move_xyz(rx2, ry2, config.Z_PICK_REL)
-        move_xyz(rx2, ry2, config.Z_BOARD)
-        magnet(False)
-        move_xyz(rx2, ry2, config.Z_TRAVEL_REL)
-
-    # --- 4. Promotion : placer une dame de réserve ---
-    if move.promotion:
-        color = board.turn
-        reserve = config.WHITE_QUEEN_RESERVE if color == chess_lib.WHITE else config.BLACK_QUEEN_RESERVE
-        used_idx = game_engine.used_white_queens if color == chess_lib.WHITE else game_engine.used_black_queens
-        if used_idx < len(reserve):
-            qx, qy = reserve[used_idx]
-            move_xyz(qx, qy, config.Z_BOARD)
-            magnet(True)
-            move_xyz(qx, qy, config.Z_PICK_REL)
-            move_xyz(dst_x, dst_y, config.Z_PICK_REL)
-            move_xyz(dst_x, dst_y, config.Z_BOARD)
-            magnet(False)
-            move_xyz(dst_x, dst_y, config.Z_TRAVEL_REL)
-            if color == chess_lib.WHITE:
-                game_engine.used_white_queens += 1
-            else:
-                game_engine.used_black_queens += 1
-
-    log_gcode(f"ROBOT JOUE : {uci_move}")
-    status_msg = f"Robot a joué {uci_move}. À vous !"
-    move_to_vision_position()
-
-
 def move_piece(fx, fy, tx, ty):
-    """Déplace physiquement une pièce de (fx,fy) à (tx,ty) avec l'aimant."""
+    """
+    Déplace physiquement une pièce de (fx,fy) à (tx,ty) avec l'aimant.
+    Les trajets horizontaux se font toujours en hauteur (Z_TRAVEL_REL) :
+    la tête ne descend qu'à la verticale de la case visée, pour ne jamais
+    accrocher les autres pièces.
+    """
+    lift_to_travel()
+    move_xyz(fx, fy, config.Z_TRAVEL_REL)
     move_xyz(fx, fy, config.Z_BOARD)
     magnet(True)
     move_xyz(fx, fy, config.Z_PICK_REL)
@@ -456,17 +347,24 @@ def move_piece(fx, fy, tx, ty):
     move_xyz(tx, ty, config.Z_TRAVEL_REL)
 
 
-def reconstruct_capture_order():
+def lift_to_travel():
+    """Remonte à la hauteur de déplacement sans bouger en XY."""
+    x, y = last_position['x'], last_position['y']
+    z = max(last_position['z'], config.Z_TRAVEL_REL)
+    move_xyz(x, y, z)
+
+
+def graveyard_contents(board):
     """
-    Rejoue l'historique des coups pour retrouver le type de chaque pièce capturée
-    dans l'ordre de capture (= ordre des slots cimetière).
+    Rejoue l'historique de `board` pour retrouver, dans l'ordre, le type de chaque
+    pièce posée au cimetière (= ordre des slots). Les pions promus y vont aussi.
     Retourne: (liste_types_blancs, liste_types_noirs) avec chess.PieceType.
     """
     import chess as chess_lib
     temp = chess_lib.Board()
     white_types = []
     black_types = []
-    for move in game_engine.board.move_stack:
+    for move in board.move_stack:
         if temp.is_en_passant(move):
             ep_sq = chess_lib.square(
                 chess_lib.square_file(move.to_square),
@@ -478,11 +376,100 @@ def reconstruct_capture_order():
         else:
             captured = temp.piece_at(move.to_square)
             if captured:
-                lst = white_types if captured.color == chess_lib.WHITE else black_types
-                # Si promotion, la pièce sur la case cible est la pièce promue, pas la pièce capturée
-                lst.append(captured.piece_type)
+                (white_types if captured.color == chess_lib.WHITE else black_types).append(captured.piece_type)
+        if move.promotion:
+            (white_types if temp.turn == chess_lib.WHITE else black_types).append(chess_lib.PAWN)
         temp.push(move)
     return white_types, black_types
+
+
+def queens_used(board):
+    """Nombre de dames de réserve déjà utilisées (promotions) : (blancs, noirs)."""
+    import chess as chess_lib
+    temp = chess_lib.Board()
+    w = b = 0
+    for move in board.move_stack:
+        if move.promotion:
+            if temp.turn == chess_lib.WHITE:
+                w += 1
+            else:
+                b += 1
+        temp.push(move)
+    return w, b
+
+
+def reconstruct_capture_order():
+    return graveyard_contents(game_engine.board)
+
+
+def perform_physical_move(board_before, move):
+    """
+    Exécute physiquement `move` à partir de la position `board_before`
+    (position AVANT le coup — passer une copie).
+    Gère prise, prise en passant, roque et promotion (dame de réserve).
+    Les index de cimetière/réserve sont déduits de l'historique, donc restent
+    justes même après une annulation de coup.
+    """
+    import chess as chess_lib
+    board = board_before
+    uci_move = move.uci()
+    src_sq, dst_sq = uci_move[:2], uci_move[2:4]
+    src_x, src_y = calculate_xy(src_sq)
+    dst_x, dst_y = calculate_xy(dst_sq)
+    w_types, b_types = graveyard_contents(board)
+    w_used = {chess_lib.WHITE: len(w_types), chess_lib.BLACK: len(b_types)}
+
+    def to_graveyard(x, y, color):
+        graveyard = config.WHITE_GRAVEYARD if color == chess_lib.WHITE else config.BLACK_GRAVEYARD
+        gx, gy = graveyard[min(w_used[color], len(graveyard) - 1)]
+        move_piece(x, y, gx, gy)
+        w_used[color] += 1
+
+    # --- 1. Prise : la pièce capturée part au cimetière ---
+    captured_piece = board.piece_at(move.to_square)
+    if captured_piece is not None:
+        to_graveyard(dst_x, dst_y, captured_piece.color)
+    elif board.is_en_passant(move):
+        ep_x, ep_y = calculate_xy(dst_sq[0] + src_sq[1])  # pion pris : même rangée que la source
+        to_graveyard(ep_x, ep_y, not board.turn)
+
+    # --- 2. Pièce principale (un pion promu part au cimetière, remplacé par une dame) ---
+    if move.promotion:
+        to_graveyard(src_x, src_y, board.turn)
+        reserve = config.WHITE_QUEEN_RESERVE if board.turn == chess_lib.WHITE else config.BLACK_QUEEN_RESERVE
+        wq, bq = queens_used(board)
+        used_idx = wq if board.turn == chess_lib.WHITE else bq
+        if used_idx < len(reserve):
+            qx, qy = reserve[used_idx]
+            move_piece(qx, qy, dst_x, dst_y)
+        else:
+            log_gcode(f"⚠ Plus de dame en réserve : posez-la à la main sur {dst_sq}")
+    else:
+        move_piece(src_x, src_y, dst_x, dst_y)
+
+    # --- 3. Roque : déplacer la tour ---
+    if board.is_castling(move):
+        king_side = chess_lib.square_file(move.to_square) == 6
+        rook_src = ('h' if king_side else 'a') + dst_sq[1]
+        rook_dst = ('f' if king_side else 'd') + dst_sq[1]
+        rx1, ry1 = calculate_xy(rook_src)
+        rx2, ry2 = calculate_xy(rook_dst)
+        move_piece(rx1, ry1, rx2, ry2)
+
+
+robot_busy = threading.Lock()   # un seul coup robot à la fois (double appui écran)
+
+def execute_move_sequence(board_before, move):
+    """Thread : joue physiquement le coup du robot puis revient en position caméra."""
+    global status_msg
+    try:
+        status_msg = f"Déplacement {move.uci()}..."
+        perform_physical_move(board_before, move)
+        log_gcode(f"ROBOT JOUE : {move.uci()}")
+        status_msg = f"Robot a joué {move.uci()}. À vous !"
+        move_to_vision_position()
+    finally:
+        robot_busy.release()
 
 
 def reset_board_physically():
@@ -494,7 +481,7 @@ def reset_board_physically():
       3. Replacer chaque pièce de son slot cimetière vers sa case de départ.
     """
     import chess as chess_lib
-    global status_msg, cap_w, cap_b
+    global status_msg
 
     log_gcode("═══ RANGEMENT DU PLATEAU ═══")
     status_msg = "Rangement du plateau en cours..."
@@ -587,8 +574,16 @@ def reset_board_physically():
             move_piece(gx, gy, tx, ty)
 
     log_gcode("═══ PLATEAU RANGÉ ═══")
+    game_engine.reset()   # les pièces sont en position initiale : la mémoire aussi
     status_msg = "Plateau rangé ! Prêt pour une nouvelle partie."
     move_to_vision_position()
+
+
+def _reset_board_thread():
+    try:
+        reset_board_physically()
+    finally:
+        robot_busy.release()
 
 
 # =============================================================================
@@ -710,8 +705,8 @@ def api_status():
         'captured': game_engine.get_captured_pieces(),
         'move_count': len(game_engine.board.move_stack),
         'clock_enabled': clock_enabled,
-        'used_white_queens': game_engine.used_white_queens,
-        'used_black_queens': game_engine.used_black_queens,
+        'used_white_queens': queens_used(game_engine.board)[0],
+        'used_black_queens': queens_used(game_engine.board)[1],
         'clock_minutes': round(game_engine.initial_time / 60, 1),
         'moves': _build_move_history(),
     })
@@ -745,10 +740,8 @@ def api_undo():
 @app.route('/api/reset', methods=['POST'])
 def api_reset():
     """Remet le jeu à zéro."""
-    global status_msg, cap_w, cap_b
+    global status_msg
     game_engine.reset()
-    cap_w = 0
-    cap_b = 0
     status_msg = "Nouvelle partie ! À vous de jouer (Blancs)."
     log_gcode("NOUVELLE PARTIE.")
     return jsonify({"status": "ok"})
@@ -758,8 +751,10 @@ def api_reset():
 def api_reset_board_physical():
     """Lance le rangement physique du plateau dans un thread séparé."""
     global status_msg
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est déjà en mouvement."}), 409
     status_msg = "Rangement du plateau — ne touchez pas les pièces !"
-    t = threading.Thread(target=reset_board_physically, daemon=True)
+    t = threading.Thread(target=_reset_board_thread, daemon=True)
     t.start()
     return jsonify({"status": "ok"})
 
@@ -767,12 +762,10 @@ def api_reset_board_physical():
 @app.route('/api/set_color', methods=['POST'])
 def api_set_color():
     """Choisit la couleur du joueur humain et démarre une nouvelle partie."""
-    global status_msg, cap_w, cap_b
+    global status_msg
     human_plays_white = bool(request.json.get('human_plays_white', True))
     config.HUMAN_PLAYS_WHITE = human_plays_white
     game_engine.reset()
-    cap_w = 0
-    cap_b = 0
     robot_plays_first = not human_plays_white
     if robot_plays_first:
         status_msg = "Robot joue les Blancs — retirez vos mains et appuyez sur JOUER ROBOT."
@@ -867,17 +860,22 @@ def api_export_usb():
 def api_bot_move():
     """Demande à Stockfish de calculer et jouer un coup."""
     global status_msg
+    robot_turn = (game_engine.board.turn == chess.WHITE) != config.HUMAN_PLAYS_WHITE
+    if not robot_turn or game_engine.is_game_over():
+        return jsonify({"status": "error", "msg": "Ce n'est pas au robot de jouer."}), 400
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est déjà en train de jouer."}), 409
     status_msg = "Stockfish réfléchit..."
     move = game_engine.compute_bot_move()
-    if move:
-        t = threading.Thread(target=execute_move_sequence, args=(move.uci(),), daemon=True)
-        t.start()
-        game_engine.board.push(move)
-        game_engine.start_clock()
-        log_gcode(f"ROBOT JOUE : {move.uci()}")
-        return jsonify({"status": "ok", "uci": move.uci()})
-    status_msg = "Erreur IA."
-    return jsonify({"status": "error"}), 500
+    if not move:
+        robot_busy.release()
+        status_msg = "Erreur IA."
+        return jsonify({"status": "error"}), 500
+    board_before = game_engine.board.copy()
+    game_engine.board.push(move)
+    game_engine.start_clock()
+    threading.Thread(target=execute_move_sequence, args=(board_before, move), daemon=True).start()
+    return jsonify({"status": "ok", "uci": move.uci()})
 
 
 @app.route('/api/player_move', methods=['POST'])
@@ -1005,13 +1003,7 @@ def cmd_physical_move():
     try:
         sx, sy = resolve_xy(src)
         dx, dy = resolve_xy(dst)
-        move_xyz(sx, sy, config.Z_BOARD)
-        magnet(True)
-        move_xyz(sx, sy, config.Z_PICK_REL)
-        move_xyz(dx, dy, config.Z_PICK_REL)
-        move_xyz(dx, dy, config.Z_BOARD)
-        magnet(False)
-        move_xyz(dx, dy, config.Z_TRAVEL_REL)
+        move_piece(sx, sy, dx, dy)
         log_gcode(f"MOUVEMENT MANUEL : {src} → {dst}")
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -1235,11 +1227,7 @@ def api_sim_reset():
 def api_sim_set_elo():
     elo = request.json.get('elo', config.DEFAULT_ELO)
     elo = max(100, min(3200, int(elo)))
-    if game_engine.engine:
-        try:
-            game_engine.engine.configure({"UCI_LimitStrength": True, "UCI_Elo": elo})
-        except Exception:
-            pass
+    game_engine.set_elo(elo)
     return jsonify({"status": "ok", "elo": elo})
 
 
@@ -1298,89 +1286,12 @@ leg_lock   = threading.Lock()
 leg_moves  = []   # liste de chess.Move de la partie chargée
 leg_index  = 0    # position courante
 leg_name   = ""
-leg_cap_w  = 0   # pièces blanches capturées (index cimetière)
-leg_cap_b  = 0   # pièces noires capturées (index cimetière)
 
 
 def execute_leg_move_sequence(uci_move):
     """Exécute la séquence physique d'un coup pour les parties légendaires."""
-    global leg_cap_w, leg_cap_b
     import chess as chess_lib
-
-    board = leg_board
-    move  = chess_lib.Move.from_uci(uci_move)
-    src_sq, dst_sq = uci_move[:2], uci_move[2:4]
-    src_x, src_y = calculate_xy(src_sq)
-    dst_x, dst_y = calculate_xy(dst_sq)
-
-    captured_piece  = board.piece_at(chess_lib.parse_square(dst_sq))
-    is_capture      = captured_piece is not None
-    is_en_passant   = board.is_en_passant(move)
-
-    # --- 1. Prise : déplacer la pièce capturée au cimetière ---
-    if is_capture:
-        graveyard = config.WHITE_GRAVEYARD if captured_piece.color == chess_lib.WHITE else config.BLACK_GRAVEYARD
-        used      = leg_cap_w if captured_piece.color == chess_lib.WHITE else leg_cap_b
-        gx, gy    = graveyard[min(used, len(graveyard) - 1)]
-        move_xyz(dst_x, dst_y, config.Z_BOARD);  magnet(True)
-        move_xyz(dst_x, dst_y, config.Z_PICK_REL)
-        move_xyz(gx, gy, config.Z_PICK_REL)
-        move_xyz(gx, gy, config.Z_BOARD);        magnet(False)
-        move_xyz(gx, gy, config.Z_TRAVEL_REL)
-        if captured_piece.color == chess_lib.WHITE:
-            leg_cap_w += 1
-        else:
-            leg_cap_b += 1
-
-    elif is_en_passant:
-        ep_col = ord(dst_sq[0]) - ord('a')
-        ep_row = int(src_sq[1]) - 1
-        ep_x   = config.BOARD_OFFSET_X + ep_col * config.SQUARE_SIZE_MM + config.SQUARE_SIZE_MM / 2
-        ep_y   = config.BOARD_OFFSET_Y + ep_row * config.SQUARE_SIZE_MM + config.SQUARE_SIZE_MM / 2
-        graveyard = config.BLACK_GRAVEYARD if board.turn == chess_lib.WHITE else config.WHITE_GRAVEYARD
-        used      = leg_cap_b if board.turn == chess_lib.WHITE else leg_cap_w
-        gx, gy    = graveyard[min(used, len(graveyard) - 1)]
-        move_xyz(ep_x, ep_y, config.Z_BOARD);  magnet(True)
-        move_xyz(ep_x, ep_y, config.Z_PICK_REL)
-        move_xyz(gx, gy, config.Z_PICK_REL)
-        move_xyz(gx, gy, config.Z_BOARD);      magnet(False)
-        move_xyz(gx, gy, config.Z_TRAVEL_REL)
-        if board.turn == chess_lib.WHITE:
-            leg_cap_b += 1
-        else:
-            leg_cap_w += 1
-
-    # --- 2. Déplacer la pièce principale ---
-    move_xyz(src_x, src_y, config.Z_BOARD);  magnet(True)
-    move_xyz(src_x, src_y, config.Z_PICK_REL)
-    move_xyz(dst_x, dst_y, config.Z_PICK_REL)
-    move_xyz(dst_x, dst_y, config.Z_BOARD);  magnet(False)
-    move_xyz(dst_x, dst_y, config.Z_TRAVEL_REL)
-
-    # --- 3. Roque : déplacer la tour ---
-    if board.is_castling(move):
-        rook_src = ('h' if chess_lib.square_file(move.to_square) == 6 else 'a') + dst_sq[1]
-        rook_dst = ('f' if chess_lib.square_file(move.to_square) == 6 else 'd') + dst_sq[1]
-        rx1, ry1 = calculate_xy(rook_src)
-        rx2, ry2 = calculate_xy(rook_dst)
-        move_xyz(rx1, ry1, config.Z_BOARD);  magnet(True)
-        move_xyz(rx1, ry1, config.Z_PICK_REL)
-        move_xyz(rx2, ry2, config.Z_PICK_REL)
-        move_xyz(rx2, ry2, config.Z_BOARD);  magnet(False)
-        move_xyz(rx2, ry2, config.Z_TRAVEL_REL)
-
-    # --- 4. Promotion : placer une dame de réserve ---
-    if move.promotion:
-        reserve  = config.WHITE_QUEEN_RESERVE if board.turn == chess_lib.WHITE else config.BLACK_QUEEN_RESERVE
-        used_idx = 0
-        if used_idx < len(reserve):
-            qx, qy = reserve[used_idx]
-            move_xyz(qx, qy, config.Z_BOARD);  magnet(True)
-            move_xyz(qx, qy, config.Z_PICK_REL)
-            move_xyz(dst_x, dst_y, config.Z_PICK_REL)
-            move_xyz(dst_x, dst_y, config.Z_BOARD);  magnet(False)
-            move_xyz(dst_x, dst_y, config.Z_TRAVEL_REL)
-
+    perform_physical_move(leg_board.copy(), chess_lib.Move.from_uci(uci_move))
     log_gcode(f"LÉGENDAIRE : {uci_move}")
 
 
@@ -1417,7 +1328,7 @@ def api_leg_games():
 
 @app.route('/api/leg/load', methods=['POST'])
 def api_leg_load():
-    global leg_board, leg_moves, leg_index, leg_name, leg_cap_w, leg_cap_b
+    global leg_board, leg_moves, leg_index, leg_name
     game_id = request.json.get('id', '')
     game = next((g for g in LEGENDARY_GAMES if g['id'] == game_id), None)
     if not game:
@@ -1430,8 +1341,6 @@ def api_leg_load():
         leg_moves  = moves
         leg_index  = 0
         leg_name   = game['name']
-        leg_cap_w  = 0
-        leg_cap_b  = 0
     return jsonify({'status': 'ok', 'total': len(moves), 'name': game['name']})
 
 
@@ -1486,12 +1395,10 @@ def api_leg_prev_move():
 
 @app.route('/api/leg/reset', methods=['POST'])
 def api_leg_reset():
-    global leg_board, leg_index, leg_cap_w, leg_cap_b
+    global leg_board, leg_index
     with leg_lock:
         leg_board = chess.Board()
         leg_index = 0
-        leg_cap_w = 0
-        leg_cap_b = 0
     return jsonify({'status': 'ok', 'captured': {'w': [], 'b': []}})
 
 
