@@ -44,10 +44,36 @@ def capture_frame(cap, n_warmup=5):
 
 
 class VisionEngine:
+    CALIB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "vision_calibration.json")
+
     def __init__(self, board_size=10):
         self.board_size = board_size  # 10x10 pour inclure le cimetière
         self.homography_matrix = None
-        self.reference_frame = None  # Photo du plateau stable
+        self.reference_frame = None  # Photo du plateau stable (redressée, niveaux de gris)
+        self.last_scores = {}        # Score de changement par case (dernière détection)
+        self.load_calibration()
+
+    # ── Calibration persistante ─────────────────────────────────────────────
+    def is_calibrated(self):
+        return self.homography_matrix is not None
+
+    def load_calibration(self):
+        import json
+        try:
+            with open(self.CALIB_FILE) as f:
+                self.homography_matrix = np.array(json.load(f)["homography"], dtype="float64")
+            print(f"[VISION] Calibration chargée depuis {self.CALIB_FILE}")
+        except FileNotFoundError:
+            print("[VISION] Pas encore de calibration (page Contrôle manuel → CALIBRER CAMÉRA).")
+        except Exception as e:
+            print(f"[VISION] Calibration illisible : {e}")
+
+    def save_calibration(self):
+        import json
+        with open(self.CALIB_FILE, "w") as f:
+            json.dump({"homography": self.homography_matrix.tolist(),
+                       "date": time.strftime("%Y-%m-%d %H:%M:%S")}, f, indent=2)
 
     def auto_calibrate(self, frame):
         """
@@ -74,20 +100,25 @@ class VisionEngine:
                     cY = int(M["m01"] / M["m00"])
                     centers.append((cX, cY))
 
-        if len(centers) < 4:
-            print(f"[VISION] Pas assez de marqueurs trouvés : {len(centers)}/4")
+        self.last_marker_count = len(centers)
+        if len(centers) != 4:
+            print(f"[VISION] Il faut exactement 4 marqueurs, trouvés : {len(centers)}")
             return False
 
         # 3. Trier les 4 points : haut-gauche, haut-droite, bas-droite, bas-gauche
-        centers = self._sort_points(centers[:4])
+        centers = self._sort_points(np.array(centers))
 
-        # 4. Calculer l'homographie
-        # On veut projeter ces 4 points sur un carré parfait de 400x400 pixels
+        # 4. Calculer l'homographie vers un carré de 400x400 px (10 cases de 40 px).
+        # Les dames sont posées AU CENTRE des 4 cases d'angle de la grille 10x10.
+        if getattr(config, "VISION_MARKERS_AT_CELL_CENTERS", True):
+            lo, hi = 20, 380
+        else:
+            lo, hi = 0, 399
         dst_pts = np.array([
-            [0, 0],
-            [399, 0],
-            [399, 399],
-            [0, 399]
+            [lo, lo],
+            [hi, lo],
+            [hi, hi],
+            [lo, hi]
         ], dtype="float32")
 
         src_pts = np.array(centers, dtype="float32")
@@ -113,78 +144,112 @@ class VisionEngine:
             return None
         return cv2.warpPerspective(frame, self.homography_matrix, (400, 400))
 
-    def detect_move(self, current_frame):
+    # ── Correspondance case d'échecs ↔ cellule de l'image redressée ─────────
+    @staticmethod
+    def square_to_cell(square):
         """
-        Compare l'image actuelle à l'image de référence pour identifier un mouvement.
-        Retourne un coup au format UCI (ex: 'e2e4') ou None.
+        Case python-chess (0..63) → (colonne, rangée) dans la grille 10x10 redressée.
+        Par défaut : colonne a = cellule 1, rangée 1 = cellule 1 (en haut de l'image).
+        Si les noms de cases de l'image de debug ne correspondent pas au plateau,
+        ajuster VISION_FLIP_FILES / VISION_FLIP_RANKS / VISION_SWAP_AXES dans config.py.
         """
-        if self.reference_frame is None or self.homography_matrix is None:
-            self.reference_frame = self.get_warped_board(current_frame)
+        f, r = square % 8, square // 8
+        if getattr(config, "VISION_FLIP_FILES", False):
+            f = 7 - f
+        if getattr(config, "VISION_FLIP_RANKS", False):
+            r = 7 - r
+        c, row = f + 1, r + 1
+        if getattr(config, "VISION_SWAP_AXES", False):
+            c, row = row, c
+        return c, row
+
+    def _prepare(self, frame):
+        """Redresse + niveaux de gris + léger flou (réduit le bruit capteur)."""
+        warped = self.get_warped_board(frame)
+        if warped is None:
             return None
+        gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+        return cv2.GaussianBlur(gray, (5, 5), 0)
 
-        new_board = self.get_warped_board(current_frame)
+    def set_reference(self, frame):
+        """Mémorise la photo du plateau stable (après le coup du robot)."""
+        self.reference_frame = self._prepare(frame)
+        return self.reference_frame is not None
 
-        # Analyse par différence
-        diff = cv2.absdiff(self.reference_frame, new_board)
-        gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray_diff, 30, 255, cv2.THRESH_BINARY)
+    def update_reference(self, frame):
+        return self.set_reference(frame)
 
-        # Analyser chaque case (10x10)
-        # Rappel : Colonne 0 = Zone Noire, Colonne 9 = Zone Blanche, Col 1-8 = Plateau
-        # On ne s'intéresse qu'au plateau 8x8 pour le coup UCI (Indices 1 à 8)
-        changes = []
-        cell_size = 40  # 400px / 10 cases
+    def square_change_scores(self, frame):
+        """Différence moyenne (0-255) entre la référence et `frame`, pour chaque case."""
+        cur = self._prepare(frame)
+        if cur is None or self.reference_frame is None:
+            return None
+        diff = cv2.absdiff(self.reference_frame, cur)
+        cell, m = 40, 8  # marge : on ignore les bords de case
+        scores = {}
+        for sq in range(64):
+            c, r = self.square_to_cell(sq)
+            roi = diff[r * cell + m:(r + 1) * cell - m, c * cell + m:(c + 1) * cell - m]
+            scores[sq] = float(roi.mean())
+        self.last_scores = scores
+        return scores
 
-        for r in range(10):
-            for c in range(10):
-                # Découpe de la case
-                y1, y2 = r * cell_size, (r + 1) * cell_size
-                x1, x2 = c * cell_size, (c + 1) * cell_size
+    @staticmethod
+    def move_squares(board, move):
+        """Cases dont le contenu change physiquement pour ce coup."""
+        import chess
+        sq = {move.from_square, move.to_square}
+        if board.is_en_passant(move):
+            sq.add(chess.square(chess.square_file(move.to_square), chess.square_rank(move.from_square)))
+        elif board.is_castling(move):
+            rank = chess.square_rank(move.from_square)
+            if chess.square_file(move.to_square) > chess.square_file(move.from_square):
+                sq |= {chess.square(7, rank), chess.square(5, rank)}
+            else:
+                sq |= {chess.square(0, rank), chess.square(3, rank)}
+        return sq
 
-                # Zone de test (on réduit un peu pour éviter les bords des cases)
-                roi = thresh[y1+5:y2-5, x1+5:x2-5]
-                score = np.sum(roi) / 255
+    def detect_legal_move(self, board, frame):
+        """
+        Trouve le coup légal qui explique le mieux les changements vus par la caméra.
+        Retourne (move ou None, message).
+        """
+        scores = self.square_change_scores(frame)
+        if scores is None:
+            return None, "Pas de photo de référence ou caméra non calibrée."
+        thr = getattr(config, "VISION_DIFF_THRESHOLD", 18)
+        changed = {sq for sq, v in scores.items() if v > thr}
+        if not changed:
+            return None, "Aucun changement vu sur le plateau."
+        if len(changed) > 6:
+            return None, f"Trop de cases modifiées ({len(changed)}) : main dans le champ ou lumière qui a changé ?"
 
-                if score > (cell_size * cell_size * 0.2):  # 20% de la case a changé
-                    changes.append((c, r))
-
-        # Un coup classique = une case qui se vide, une case qui se remplit
-        if len(changes) == 2:
-            c1, r1 = changes[0]
-            c2, r2 = changes[1]
-
-            if 1 <= c1 <= 8 and 1 <= r1 <= 8 and 1 <= c2 <= 8 and 1 <= r2 <= 8:
-                files = "abcdefgh"
-
-                # Fonction locale pour évaluer la "quantité de pièce" sur une case
-                def get_piece_presence(frame, c, r):
-                    y1, y2 = r * cell_size, (r + 1) * cell_size
-                    x1, x2 = c * cell_size, (c + 1) * cell_size
-                    roi = frame[y1+5:y2-5, x1+5:x2-5]
-                    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                    _, thresh = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
-                    return np.sum(thresh)
-
-                # On compare la présence de pièce entre AVANT et MAINTENANT
-                diff1 = get_piece_presence(new_board, c1, r1) - get_piece_presence(self.reference_frame, c1, r1)
-                diff2 = get_piece_presence(new_board, c2, r2) - get_piece_presence(self.reference_frame, c2, r2)
-
-                # La case source est celle qui a PERDU une pièce (différence la plus négative)
-                if diff1 < diff2:
-                    src, dest = (c1, r1), (c2, r2)
-                else:
-                    src, dest = (c2, r2), (c1, r1)
-
-                sq1 = files[src[0]-1] + str(src[1])
-                sq2 = files[dest[0]-1] + str(dest[1])
-
-                shape_name = self.recognize_piece_shape(new_board, dest[0], dest[1])
-                if shape_name:
-                    print(f"[VISION] Pièce identifiée à l'arrivée : {shape_name}")
-
-                return sq1 + sq2
-
-        return None
+        best, best_key, tie = None, None, False
+        seen = set()
+        for move in board.legal_moves:
+            if move.promotion and move.promotion != 5:  # 5 = chess.QUEEN : promotion en dame
+                continue
+            squares = frozenset(self.move_squares(board, move))
+            if squares in seen:
+                continue
+            seen.add(squares)
+            if not squares <= changed:
+                continue
+            # Le meilleur coup explique le plus de changements et en laisse le moins
+            key = (-len(changed - squares), len(squares), min(scores[s] for s in squares))
+            if best_key is None or key[:2] > best_key[:2]:
+                best, best_key, tie = move, key, False
+            elif key[:2] == best_key[:2]:
+                tie = True
+                if key[2] > best_key[2]:
+                    best, best_key = move, key
+        if best is None:
+            import chess
+            names = ", ".join(sorted(chess.square_name(s) for s in changed))
+            return None, f"Changements ({names}) ne correspondant à aucun coup légal."
+        if tie:
+            return None, "Plusieurs coups possibles, impossible de trancher."
+        return best, "ok"
 
     def recognize_piece_shape(self, frame, col, row):
         """
@@ -232,20 +297,18 @@ class VisionEngine:
         debug_img = warped.copy()
         cell_size = 40
 
-        for r in range(1, 9):  # On ne dessine que l'échiquier 8x8
-            for c in range(1, 9):
-                y1, y2 = r * cell_size, (r + 1) * cell_size
-                x1, x2 = c * cell_size, (c + 1) * cell_size
-
-                # Dessiner la grille
-                cv2.rectangle(debug_img, (x1, y1), (x2, y2), (0, 255, 0), 1)
-
-                # Tenter d'identifier la pièce sur cette case
-                shape = self.recognize_piece_shape(warped, c, r)
-                if shape:
-                    label = shape.split(' ')[0]  # Juste le nom
-                    cv2.putText(debug_img, label, (x1+2, y1+25),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+        files = "abcdefgh"
+        thr = getattr(config, "VISION_DIFF_THRESHOLD", 18)
+        for sq in range(64):
+            c, r = self.square_to_cell(sq)
+            y1, y2 = r * cell_size, (r + 1) * cell_size
+            x1, x2 = c * cell_size, (c + 1) * cell_size
+            changed = self.last_scores.get(sq, 0) > thr
+            # Grille (rouge = case vue comme modifiée au dernier coup)
+            cv2.rectangle(debug_img, (x1, y1), (x2, y2), (0, 0, 255) if changed else (0, 255, 0), 1)
+            # Nom de la case : permet de vérifier l'orientation caméra
+            cv2.putText(debug_img, files[sq % 8] + str(sq // 8 + 1), (x1 + 3, y1 + 13),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (255, 255, 0), 1)
 
         return debug_img
 

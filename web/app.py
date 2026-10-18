@@ -123,13 +123,18 @@ def startup_sequence():
     """Au démarrage : homing puis position caméra."""
     if not ser and not config.SIMULATION_MODE:
         return
-    log_gcode("DÉMARRAGE : Homing G28...")
-    global last_position
-    if send_gcode_raw("G28"):
-        last_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
-        move_to_vision_position()
-    else:
-        log_gcode("⚠️ Homing non confirmé — position caméra annulée.")
+    global last_position, status_msg
+    with robot_busy:
+        status_msg = "Démarrage : mise en position du robot..."
+        log_gcode("DÉMARRAGE : Homing G28...")
+        if send_gcode_raw("G28"):
+            last_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+            move_to_vision_position()
+            capture_reference()
+            status_msg = "Robot prêt. Jouez votre coup puis appuyez sur J'AI JOUÉ."
+        else:
+            log_gcode("⚠️ Homing non confirmé — position caméra annulée.")
+            status_msg = "⚠️ Homing non confirmé : vérifiez l'imprimante."
 
 def move_to_vision_position():
     """Déplace la tête en position caméra : plateau reculé au max, tête levée."""
@@ -318,6 +323,47 @@ class CameraStream:
 
 camera = CameraStream()
 
+
+# =============================================================================
+# VISION : PHOTO DE RÉFÉRENCE ET DÉTECTION DU COUP HUMAIN
+# =============================================================================
+
+def grab_stable_frame(n=3):
+    """Moyenne de n images récentes (réduit le bruit). None si pas de caméra."""
+    if not camera.cam_ok:
+        return None
+    frames = []
+    for _ in range(n * 4):
+        f = camera.get_raw()
+        if f is not None:
+            frames.append(f.astype('float32'))
+            if len(frames) >= n:
+                break
+        time.sleep(0.12)
+    if not frames:
+        return None
+    return (sum(frames) / len(frames)).astype('uint8')
+
+
+def capture_reference():
+    """Photo du plateau stable, tête en position caméra (à appeler après le coup du robot)."""
+    time.sleep(getattr(config, 'VISION_SETTLE_SEC', 1.0))
+    if not vision_engine.is_calibrated():
+        log_gcode("📷 Caméra non calibrée : saisie du coup à l'écran.")
+        vision_engine.reference_frame = None
+        return False
+    frame = grab_stable_frame()
+    if frame is None or not vision_engine.set_reference(frame):
+        log_gcode("📷 Photo de référence impossible (caméra indisponible).")
+        vision_engine.reference_frame = None
+        return False
+    log_gcode("📷 Photo de référence prise.")
+    return True
+
+
+def vision_ready():
+    return camera.cam_ok and vision_engine.is_calibrated() and vision_engine.reference_frame is not None
+
 # =============================================================================
 # ÉTAT SIMULATION
 # =============================================================================
@@ -466,8 +512,12 @@ def execute_move_sequence(board_before, move):
         status_msg = f"Déplacement {move.uci()}..."
         perform_physical_move(board_before, move)
         log_gcode(f"ROBOT JOUE : {move.uci()}")
-        status_msg = f"Robot a joué {move.uci()}. À vous !"
         move_to_vision_position()
+        capture_reference()
+        if game_engine.is_game_over():
+            status_msg = f"Robot a joué {move.uci()}. Partie terminée !"
+        else:
+            status_msg = f"Robot a joué {move.uci()}. À vous : jouez puis appuyez sur J'AI JOUÉ."
     finally:
         robot_busy.release()
 
@@ -577,6 +627,7 @@ def reset_board_physically():
     game_engine.reset()   # les pièces sont en position initiale : la mémoire aussi
     status_msg = "Plateau rangé ! Prêt pour une nouvelle partie."
     move_to_vision_position()
+    capture_reference()
 
 
 def _reset_board_thread():
@@ -654,9 +705,22 @@ def board_svg():
     """Génère le visuel SVG de l'échiquier actuel."""
     import chess.svg
     last_move = game_engine.board.peek() if game_engine.board.move_stack else None
+    fill = {}
+    selected = request.args.get('sel')
+    if selected:
+        try:
+            sq = chess.parse_square(selected)
+            fill[sq] = "#aaffaa"
+            for m in game_engine.board.legal_moves:
+                if m.from_square == sq:
+                    fill[m.to_square] = "#ffff88"
+        except ValueError:
+            pass
     svg = chess.svg.board(
         board=game_engine.board,
         lastmove=last_move,
+        fill=fill,
+        coordinates=False,   # sans marge : un clic tombe exactement sur la bonne case
         size=450
     )
     return Response(svg, mimetype='image/svg+xml')
@@ -709,6 +773,8 @@ def api_status():
         'used_black_queens': queens_used(game_engine.board)[1],
         'clock_minutes': round(game_engine.initial_time / 60, 1),
         'moves': _build_move_history(),
+        'robot_busy': robot_busy.locked(),
+        'vision_ready': vision_ready(),
     })
 
 
@@ -733,7 +799,8 @@ def _build_move_history():
 def api_undo():
     """Annule le dernier coup (humain + robot)."""
     game_engine.undo()
-    log_gcode("ANNULATION du dernier coup.")
+    vision_engine.reference_frame = None   # plateau remis à la main : reprendre la photo
+    log_gcode("ANNULATION du dernier coup — replacez les pièces à la main.")
     return jsonify({"status": "ok", "fen": game_engine.get_fen()})
 
 
@@ -770,11 +837,23 @@ def api_set_color():
     if robot_plays_first:
         status_msg = "Robot joue les Blancs — retirez vos mains et appuyez sur JOUER ROBOT."
     else:
-        status_msg = "Nouvelle partie ! À vous de jouer (Blancs)."
+        status_msg = "Nouvelle partie ! Jouez votre coup puis appuyez sur J'AI JOUÉ."
     log_gcode(f"NOUVELLE PARTIE — Humain={'Blancs' if human_plays_white else 'Noirs'}")
+    threading.Thread(target=_prepare_new_game, daemon=True).start()
     return jsonify({"status": "ok",
                     "human_plays_white": human_plays_white,
                     "robot_plays_first": robot_plays_first})
+
+
+def _prepare_new_game():
+    """Tête en position caméra puis photo de référence du plateau de départ."""
+    if not robot_busy.acquire(timeout=120):
+        return
+    try:
+        move_to_vision_position()
+        capture_reference()
+    finally:
+        robot_busy.release()
 
 
 @app.route('/api/set_elo', methods=['POST'])
@@ -865,17 +944,127 @@ def api_bot_move():
         return jsonify({"status": "error", "msg": "Ce n'est pas au robot de jouer."}), 400
     if not robot_busy.acquire(blocking=False):
         return jsonify({"status": "busy", "msg": "Le robot est déjà en train de jouer."}), 409
+    move = start_robot_reply()
+    if not move:
+        return jsonify({"status": "error"}), 500
+    return jsonify({"status": "ok", "uci": move.uci()})
+
+
+def start_robot_reply():
+    """
+    Stockfish choisit un coup et le robot le joue (thread). L'appelant détient robot_busy,
+    qui est relâché à la fin du mouvement (ou tout de suite en cas d'erreur).
+    """
+    global status_msg
     status_msg = "Stockfish réfléchit..."
     move = game_engine.compute_bot_move()
     if not move:
         robot_busy.release()
         status_msg = "Erreur IA."
-        return jsonify({"status": "error"}), 500
+        return None
     board_before = game_engine.board.copy()
     game_engine.board.push(move)
     game_engine.start_clock()
     threading.Thread(target=execute_move_sequence, args=(board_before, move), daemon=True).start()
-    return jsonify({"status": "ok", "uci": move.uci()})
+    return move
+
+
+@app.route('/api/validate_move', methods=['POST'])
+def api_validate_move():
+    """
+    Le joueur a bougé sa pièce sur le plateau et appuie sur J'AI JOUÉ.
+    - sans 'uci' : photo, comparaison avec la référence, choix du coup légal correspondant ;
+    - avec 'uci' : coup saisi à l'écran (secours si la caméra n'a pas pu trancher).
+    Si le coup est reconnu, le robot répond aussitôt.
+    """
+    global status_msg
+    data = request.get_json(silent=True) or {}
+    human_turn = (game_engine.board.turn == chess.WHITE) == config.HUMAN_PLAYS_WHITE
+    if not human_turn or game_engine.is_game_over():
+        return jsonify({"status": "error", "msg": "Ce n'est pas à vous de jouer."}), 400
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+
+    uci = (data.get('uci') or '').strip().lower()
+    if uci:
+        source = "écran"
+        try:
+            move = chess.Move.from_uci(uci)
+            if move not in game_engine.board.legal_moves:
+                move = chess.Move.from_uci(uci + 'q')   # promotion : dame par défaut
+        except ValueError:
+            move = None
+        if move is None or move not in game_engine.board.legal_moves:
+            robot_busy.release()
+            return jsonify({"status": "illegal", "msg": f"Coup illégal : {uci}"}), 400
+    else:
+        source = "caméra"
+        if not vision_ready():
+            robot_busy.release()
+            reason = ("Caméra indisponible" if not camera.cam_ok else
+                      "Caméra non calibrée" if not vision_engine.is_calibrated() else
+                      "Pas de photo de référence")
+            return jsonify({"status": "manual", "msg": f"{reason} : indiquez votre coup à l'écran."})
+        status_msg = "📷 Analyse de votre coup..."
+        frame = grab_stable_frame()
+        if frame is not None:
+            move, why = vision_engine.detect_legal_move(game_engine.board, frame)
+        else:
+            move, why = None, "Photo impossible."
+        if move is None:
+            robot_busy.release()
+            status_msg = f"Coup non reconnu : {why}"
+            log_gcode(f"📷 Coup non reconnu : {why}")
+            return jsonify({"status": "manual", "msg": f"{why} Indiquez votre coup à l'écran."})
+
+    san = game_engine.board.san(move)
+    game_engine.board.push(move)
+    game_engine.stop_clock()
+    log_gcode(f"JOUEUR JOUE : {move.uci()} ({san}, {source})")
+    if game_engine.is_game_over():
+        robot_busy.release()
+        status_msg = f"Vous avez joué {san}. Partie terminée !"
+        return jsonify({"status": "ok", "human": move.uci(), "san": san, "source": source, "robot": None})
+    reply = start_robot_reply()
+    return jsonify({"status": "ok", "human": move.uci(), "san": san, "source": source,
+                    "robot": reply.uci() if reply else None})
+
+
+@app.route('/api/vision/calibrate', methods=['POST'])
+def api_vision_calibrate():
+    """Calibration : plateau vide sauf 4 dames noires au centre des 4 cases d'angle."""
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+    try:
+        move_to_vision_position()
+        time.sleep(getattr(config, 'VISION_SETTLE_SEC', 1.0))
+        frame = grab_stable_frame()
+        if frame is None:
+            return jsonify({"status": "error", "msg": "Caméra indisponible."}), 503
+        if not vision_engine.auto_calibrate(frame):
+            n = getattr(vision_engine, 'last_marker_count', 0)
+            return jsonify({"status": "error",
+                            "msg": f"{n} marqueur(s) trouvé(s) au lieu de 4. "
+                                   "Plateau vide + 4 dames noires au centre des cases d'angle."}), 400
+        vision_engine.save_calibration()
+        log_gcode("📷 Calibration caméra réussie et enregistrée.")
+        return jsonify({"status": "ok", "msg": "Calibration réussie et enregistrée."})
+    finally:
+        robot_busy.release()
+
+
+@app.route('/api/vision/reference', methods=['POST'])
+def api_vision_reference():
+    """Reprend la photo de référence (après avoir remis des pièces en place à la main)."""
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+    try:
+        move_to_vision_position()
+        ok = capture_reference()
+        return jsonify({"status": "ok" if ok else "error",
+                        "msg": "Photo de référence prise." if ok else "Photo impossible (caméra / calibration)."})
+    finally:
+        robot_busy.release()
 
 
 @app.route('/api/player_move', methods=['POST'])

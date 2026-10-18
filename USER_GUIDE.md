@@ -41,7 +41,6 @@ Une caméra fixée à l'arrière de la tête d'impression permet au robot de "vo
 | Imprimante 3D (DiscoEasy 200) | Le bras robotique qui déplace les pièces |
 | Carte Marlin (MKS/RAMPS) | Pilote les moteurs de l'imprimante |
 | Caméra USB | Voit le plateau pour analyser les coups |
-| Bouton physique (endstop) | Permet au joueur de valider ses coups et de déclencher le robot |
 | Échiquier + pièces | Le plateau de jeu (pièces avec socles magnétiques) |
 | Écran tactile (ou écran + clavier) | Affiche l'interface |
 
@@ -53,9 +52,8 @@ Branchez dans cet ordre :
 
 1. **Caméra USB** → port USB du Jetson Orin
 2. **Câble USB** entre la carte Marlin et le Jetson Orin
-3. **Bouton physique** → connecteur **Z_MAX** (fin de course Z supérieur) sur la carte Marlin
-4. **Alimentation de l'imprimante** → branchez en premier
-5. **Alimentation du Jetson Orin** → branchez en dernier
+3. **Alimentation de l'imprimante** → branchez en premier
+4. **Alimentation du Jetson Orin** → branchez en dernier
 
 > ⚠️ **Important** : Allumez toujours l'imprimante AVANT le Jetson Orin.
 
@@ -145,26 +143,33 @@ Un écran de choix apparaît :
 
 ### Étape 2 — Si vous jouez les Blancs
 
-1. Déplacez physiquement votre pièce sur le plateau
+1. Déplacez physiquement votre pièce sur le plateau (pour une prise, posez vous-même la pièce prise au cimetière)
 2. **Retirez votre main** de la zone de jeu
-3. Le robot analyse votre coup via la caméra
-4. Un bandeau orange apparaît : *"Retirez vos mains — appuyez sur JOUER ROBOT"*
-5. **Vérifiez que vos mains sont bien loin du plateau**
-6. Appuyez sur **🤖 JOUER ROBOT** (ou sur le **bouton physique**)
-7. Le robot calcule et joue son coup — **ne touchez pas le plateau pendant qu'il bouge !**
-8. Répétez depuis l'étape 1
+3. Appuyez sur **✅ J'AI JOUÉ** (bouton bleu)
+4. Le robot prend une photo, la compare à la photo prise après son dernier coup et retrouve votre coup
+5. Il réfléchit puis joue son coup — **ne touchez pas le plateau pendant qu'il bouge !**
+6. À la fin, la tête retourne en position caméra et reprend une photo de référence
+7. Le bouton redevient **✅ J'AI JOUÉ** : à vous
+
+**Si la caméra n'arrive pas à reconnaître votre coup** (caméra débranchée, main dans le champ, lumière qui a changé…), une fenêtre s'ouvre : touchez la pièce que vous avez déplacée, puis sa case d'arrivée. Le bouton **📷 Réessayer la caméra** relance la photo. Une promotion donne toujours une dame.
 
 ### Étape 3 — Si vous jouez les Noirs
 
-Le robot joue les Blancs et commence. Dès le démarrage de la partie :
+Le robot joue les Blancs et commence :
 1. Le bandeau orange apparaît automatiquement
 2. **Éloignez vos mains**
 3. Appuyez sur **🤖 JOUER ROBOT** pour que le robot joue son premier coup
-4. Ensuite, jouez votre coup et recommencez
+4. Ensuite, jouez votre coup et appuyez sur **✅ J'AI JOUÉ**
 
-### Le bouton physique
+### Avant la première partie : calibrer la caméra (une seule fois)
 
-Le **bouton physique** (branché sur Z_MAX de la carte Marlin) fait exactement la même chose que le bouton **🤖 JOUER ROBOT** à l'écran. Vous pouvez utiliser l'un ou l'autre selon votre préférence.
+1. Page **🎮 Manuel**, faites un **🏠 HOME G28**
+2. Videz le plateau et posez **4 dames noires au centre des 4 cases d'angle** de la grille 10×10
+3. Appuyez sur **🎯 CALIBRER CAMÉRA** : la tête va en position caméra et repère les 4 dames
+4. Remettez les pièces en position de départ, appuyez sur **📸 PHOTO RÉFÉRENCE**
+5. Touchez l'image sous les boutons : les noms de cases (a1, e4…) doivent correspondre au vrai plateau. Sinon, ajustez `VISION_FLIP_FILES`, `VISION_FLIP_RANKS` ou `VISION_SWAP_AXES` dans `config.py`
+
+La calibration est enregistrée dans `vision_calibration.json` et reste valable tant que la caméra ne bouge pas.
 
 ### Fin de partie
 
@@ -180,7 +185,7 @@ Cliquez n'importe où pour fermer l'animation.
 
 Cliquez sur **ANNULER COUP** pour revenir deux demi-coups en arrière (votre coup + celui du robot).
 
-> ⚠️ Le plateau physique ne se réinitialise pas automatiquement — vous devez replacer les pièces à la main selon ce que montre l'échiquier à l'écran.
+> ⚠️ Le plateau physique ne se réinitialise pas automatiquement — vous devez replacer les pièces à la main selon ce que montre l'échiquier à l'écran. Le coup suivant sera saisi à l'écran (ou appuyez sur **📸 PHOTO RÉFÉRENCE** dans la page Manuel une fois les pièces replacées).
 
 ### Modifier une pièce (correction d'erreur)
 
@@ -284,6 +289,8 @@ Cette page permet de contrôler manuellement les moteurs du robot sans jouer aux
 
 **Réglage Z de prise** : Ajuste la hauteur à laquelle l'aimant attrape les pièces.
 
+**Caméra** : **🎯 CALIBRER CAMÉRA** et **📸 PHOTO RÉFÉRENCE** (voir « Calibrer la caméra » au chapitre 6), avec l'image analysée par le robot.
+
 ---
 
 ## 10. Réglages importants
@@ -309,7 +316,6 @@ nano /home/pp/robot_echecs_orin/config.py
 | `VISION_X` | `100.0` | Position X de la tête pour la photo (mm) |
 | `VISION_Y` | `200.0` | Position Y du plateau pour la photo (max = reculé) |
 | `Z_VISION` | `100.0` | Hauteur Z pour la photo (10 cm) |
-| `ENDSTOP_BUTTON_NAME` | `z_max` | Connecteur du bouton physique sur la carte |
 
 ### Calibration du plateau
 
@@ -331,7 +337,7 @@ La tête d'impression se déplace rapidement et peut blesser. Respectez toujours
 1. **Jouez votre coup**
 2. **Retirez complètement vos mains** du plateau et de la zone de jeu
 3. Attendez que le **bandeau orange** apparaisse à l'écran
-4. Appuyez sur **🤖 JOUER ROBOT** ou le **bouton physique** SEULEMENT quand vos mains sont loin
+4. Appuyez sur **🤖 JOUER ROBOT** SEULEMENT quand vos mains sont loin
 5. **N'approchez pas** pendant que le robot bouge (attendez que le mouvement soit terminé)
 
 Le bouton **⛔ STOP D'URGENCE** arrête immédiatement tous les moteurs si nécessaire.
@@ -372,15 +378,6 @@ Le plateau n'est pas bien calibré. Allez dans **Contrôle Manuel** et recalibre
 2. Appuyez sur **📷 POSITION CAMÉRA**
 3. Vérifiez que toute la surface du plateau est visible dans le flux caméra
 4. Si besoin, ajustez `VISION_X`, `VISION_Y`, ou `Z_VISION` dans `config.py`
-
-### "Le bouton physique ne répond pas"
-Vérifiez que `ENDSTOP_BUTTON_NAME = "z_max"` dans `config.py` correspond bien au connecteur utilisé sur la carte Marlin.
-
----
-
-## 13. Installation depuis zéro
-
-Cette section est pour réinstaller le robot sur un nouveau Jetson Orin.
 
 ### Étape 1 — Prérequis système
 ```bash

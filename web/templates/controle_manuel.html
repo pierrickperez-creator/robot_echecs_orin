@@ -235,6 +235,21 @@
         <button class="btn-teal"   style="width:100%" onclick="setHome()">📌 DÉFINIR POSITION HOME</button>
         <button class="btn-purple" style="width:100%;margin-top:6px" onclick="gotoVision()">📷 POSITION CAMÉRA</button>
 
+        <!-- Vision -->
+        <div class="section-title">Caméra / détection des coups</div>
+        <div style="font-size:10px;color:#888;margin-bottom:4px">
+            Calibration : plateau vide, 4 dames noires au centre des 4 cases d'angle de la grille 10×10.
+        </div>
+        <div class="btn2">
+            <button class="btn-teal"   onclick="visionCall('/api/vision/calibrate', this)">🎯 CALIBRER CAMÉRA</button>
+            <button class="btn-purple" onclick="visionCall('/api/vision/reference', this)">📸 PHOTO RÉFÉRENCE</button>
+        </div>
+        <div id="vision-msg" style="font-size:11px;color:#aaa;text-align:center;margin:4px 0"></div>
+        <img id="vision-debug" src="/api/vision_frame" alt="Vue caméra analysée"
+             style="width:100%;border-radius:6px;background:#000;cursor:pointer"
+             onclick="this.src='/api/vision_frame?t='+Date.now()"
+             title="Toucher pour rafraîchir : les noms de cases doivent correspondre au vrai plateau">
+
         <!-- Log GCode -->
         <div class="section-title">Log GCode en direct</div>
         <div id="gcode-log">En attente...</div>
@@ -417,6 +432,18 @@ function setMagnet(state) {
 function doHome() {
     fetch('/cmd/home', {method: 'POST'});
     updatePosition(0, 0, 0);
+}
+
+function visionCall(url, btn) {
+    const msg = document.getElementById('vision-msg');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ ...';
+    msg.textContent = 'Le robot va en position caméra...';
+    fetch(url, {method: 'POST'}).then(r => r.json()).then(d => {
+        msg.textContent = (d.status === 'ok' ? '✅ ' : '❌ ') + (d.msg || d.status);
+        document.getElementById('vision-debug').src = '/api/vision_frame?t=' + Date.now();
+    }).catch(() => { msg.textContent = '❌ Serveur injoignable'; })
+      .finally(() => { btn.disabled = false; btn.textContent = orig; });
 }
 
 function doStop() {

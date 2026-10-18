@@ -173,6 +173,32 @@
             box-shadow: 0 0 18px #27ae60aa;
         }
         #btn-play-robot.waiting { background: #555; cursor: not-allowed; }
+        #btn-play-robot.human {
+            background: #2980b9;
+            animation: pulse-blue 1.2s infinite;
+        }
+        @keyframes pulse-blue {
+            0%,100% { box-shadow: 0 0 10px #2980b988; }
+            50%      { box-shadow: 0 0 28px #3498dbff; }
+        }
+        #safety-banner.info { background: #123a5a; border-color: #3498db; color: #aed6f1; animation: none; }
+
+        /* Saisie du coup à l'écran (secours caméra) */
+        #touch-modal {
+            display: none; position: fixed; inset: 0; z-index: 2000;
+            background: rgba(0,0,0,0.85); align-items: center; justify-content: center;
+        }
+        #touch-modal.show { display: flex; }
+        .touch-box {
+            background: #1c2833; border: 3px solid #3498db; border-radius: 14px;
+            padding: 14px; text-align: center; max-width: 96vw;
+        }
+        .touch-box h2 { margin: 0 0 6px; font-size: 18px; color: #f1c40f; }
+        #touch-msg  { font-size: 13px; color: #ccc; margin-bottom: 4px; }
+        #touch-step { font-size: 15px; font-weight: bold; color: #aed6f1; margin-bottom: 8px; }
+        #touch-board { width: min(70vh, 88vw); height: min(70vh, 88vw); display: block; margin: 0 auto; }
+        .touch-actions { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .touch-actions button { padding: 12px 22px; font-size: 15px; }
         @keyframes pulse-green {
             0%,100% { box-shadow: 0 0 10px #27ae6088; }
             50%      { box-shadow: 0 0 28px #27ae60ff; }
@@ -399,7 +425,7 @@
 
             <!-- Boutons -->
             <div class="btn-grid">
-                <button id="btn-play-robot" class="waiting" onclick="playRobotMove()">🤖 JOUER ROBOT</button>
+                <button id="btn-play-robot" class="waiting" onclick="mainAction()">⏳ Démarrage...</button>
                 <button class="btn-blue"   onclick="goHome()">HOME MOTEURS</button>
                 <button class="btn-orange" id="edit-btn" onclick="toggleEditMode()">MODIFIER PIÈCE : OFF</button>
                 <button class="btn-blue"   onclick="undoLastMove()">ANNULER COUP</button>
@@ -424,6 +450,20 @@
             </div>
 
         </div><!-- /panel-body -->
+    </div>
+</div>
+
+<!-- Modale saisie du coup à l'écran -->
+<div id="touch-modal">
+    <div class="touch-box">
+        <h2>✋ Indiquez votre coup</h2>
+        <div id="touch-msg"></div>
+        <div id="touch-step">Touchez la pièce que vous avez déplacée</div>
+        <img id="touch-board" src="/board.svg" onclick="onTouchBoard(event)">
+        <div class="touch-actions">
+            <button class="btn-gray" onclick="touchRetryCamera()">📷 Réessayer la caméra</button>
+            <button class="btn-stop" onclick="closeTouch()">Annuler</button>
+        </div>
     </div>
 </div>
 
@@ -559,11 +599,9 @@ function toggleEditMode() {
 }
 function onBoardClick(event) {
     if (!editMode) return;
-    const img = event.currentTarget || event.target;
-    const rect = img.getBoundingClientRect();
-    const col = String.fromCharCode(97 + Math.floor((event.clientX-rect.left)/(rect.width/8)));
-    const row = 8 - Math.floor((event.clientY-rect.top)/(rect.height/8));
-    selectedSquare = col + row;
+    const sq = squareFromEvent(event);
+    if (!sq) return;
+    selectedSquare = sq;
     document.getElementById('target-square').textContent = selectedSquare.toUpperCase();
     document.getElementById('piece-selector').style.display = 'block';
 }
@@ -588,32 +626,128 @@ function refreshBoard() {
     document.getElementById('board-img').src      = '/board.svg?t=' + ts;
     document.getElementById('board-img-left').src = '/board.svg?t=' + ts;
 }
-function playRobotMove() {
+// ─── Bouton principal : J'AI JOUÉ (tour humain) / JOUER ROBOT (tour robot) ───
+let lastStatus = null;
+let actionPending = false;
+
+function mainAction() {
     const btn = document.getElementById('btn-play-robot');
-    if (btn.classList.contains('waiting')) return;   // sécurité : ignoré si pas le bon tour
-    setSafetyMode(false);
-    btn.classList.replace('ready', 'waiting');
-    btn.textContent = '⏳ Robot réfléchit...';
-    document.getElementById('status').textContent = 'Stockfish réfléchit...';
-    fetch('/api/bot_move',{method:'POST'}).then(r=>r.json()).then(d=>{
-        document.getElementById('status').textContent = d.status==='ok'?'Robot joue : '+d.uci:'Erreur IA';
-        refreshBoard();
-    });
+    if (btn.classList.contains('waiting') || actionPending) return;
+    if (btn.dataset.mode === 'human') validateMove();
+    else if (btn.dataset.mode === 'robot') playRobotMove();
 }
 
-function setSafetyMode(on) {
-    const banner = document.getElementById('safety-banner');
+function setBusyButton(text) {
+    const btn = document.getElementById('btn-play-robot');
+    btn.className = 'waiting';
+    btn.dataset.mode = '';
+    btn.textContent = text;
+}
+
+function playRobotMove() {
+    actionPending = true;
+    setBusyButton('⏳ Robot réfléchit...');
+    document.getElementById('status').textContent = 'Stockfish réfléchit...';
+    fetch('/api/bot_move',{method:'POST'}).then(r=>r.json()).then(d=>{
+        document.getElementById('status').textContent = d.status==='ok'?'Robot joue : '+d.uci:(d.msg||'Erreur IA');
+        refreshBoard();
+    }).finally(()=>{ actionPending = false; pollStatus(); });
+}
+
+function validateMove(uci) {
+    actionPending = true;
+    setBusyButton(uci ? '⏳ Coup enregistré...' : '📷 Analyse du plateau...');
+    fetch('/api/validate_move', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(uci ? {uci} : {})
+    }).then(r=>r.json()).then(d=>{
+        if (d.status === 'ok') {
+            closeTouch();
+            document.getElementById('status').textContent =
+                `Vous : ${d.san||d.human} (${d.source})` + (d.robot ? ` — Robot : ${d.robot}` : '');
+            refreshBoard();
+        } else if (d.status === 'manual') {
+            openTouch(d.msg);
+        } else {
+            if (document.getElementById('touch-modal').classList.contains('show')) {
+                touchSel = '';
+                document.getElementById('touch-msg').textContent = d.msg || 'Coup refusé';
+                refreshTouchBoard();
+            } else {
+                document.getElementById('status').textContent = d.msg || 'Erreur';
+            }
+        }
+    }).catch(()=>{
+        document.getElementById('status').textContent = 'Serveur injoignable';
+    }).finally(()=>{ actionPending = false; pollStatus(); });
+}
+
+// Met le bouton et le bandeau dans l'état correspondant au serveur
+function updateMainButton(d) {
+    if (actionPending) return;
     const btn    = document.getElementById('btn-play-robot');
-    if (on) {
+    const banner = document.getElementById('safety-banner');
+    banner.classList.remove('show', 'info');
+    if (d.game_over) {
+        setBusyButton('🏁 Partie terminée');
+    } else if (d.robot_busy) {
+        setBusyButton('⏳ Robot en action...');
+        banner.textContent = '⚠️ Ne touchez pas le plateau : le robot travaille';
         banner.classList.add('show');
-        btn.classList.replace('waiting','ready');
+    } else if (d.robot_turn) {
+        btn.className = 'ready'; btn.dataset.mode = 'robot';
         btn.textContent = '🤖 JOUER ROBOT';
+        banner.textContent = '⚠️ Retirez vos mains de la zone de jeu puis appuyez sur JOUER ROBOT';
+        banner.classList.add('show');
     } else {
-        banner.classList.remove('show');
-        btn.classList.replace('ready','waiting');
-        btn.textContent = '🤖 JOUER ROBOT';
+        btn.className = 'human'; btn.dataset.mode = 'human';
+        btn.textContent = "✅ J'AI JOUÉ";
+        banner.textContent = d.vision_ready
+            ? "Déplacez votre pièce, retirez vos mains puis appuyez sur J'AI JOUÉ"
+            : "Déplacez votre pièce puis appuyez sur J'AI JOUÉ (saisie à l'écran : caméra non prête)";
+        banner.classList.add('show', 'info');
     }
 }
+
+// ─── Saisie tactile (secours) ─────────────────────────────────────────────
+let touchSel = '';
+function openTouch(msg) {
+    touchSel = '';
+    document.getElementById('touch-msg').textContent = msg || '';
+    refreshTouchBoard();
+    document.getElementById('touch-modal').classList.add('show');
+}
+function closeTouch() {
+    document.getElementById('touch-modal').classList.remove('show');
+    touchSel = '';
+}
+function touchRetryCamera() { closeTouch(); validateMove(); }
+function refreshTouchBoard() {
+    document.getElementById('touch-step').textContent = touchSel
+        ? `Pièce ${touchSel.toUpperCase()} : touchez la case d'arrivée (ou une autre pièce)`
+        : 'Touchez la pièce que vous avez déplacée';
+    document.getElementById('touch-board').src =
+        '/board.svg?t=' + Date.now() + (touchSel ? '&sel=' + touchSel : '');
+}
+function squareFromEvent(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const f = Math.floor((event.clientX - rect.left) / (rect.width / 8));
+    const r = 8 - Math.floor((event.clientY - rect.top) / (rect.height / 8));
+    if (f < 0 || f > 7 || r < 1 || r > 8) return '';
+    return String.fromCharCode(97 + f) + r;
+}
+function onTouchBoard(event) {
+    const sq = squareFromEvent(event);
+    if (!sq) return;
+    const legal = (lastStatus && lastStatus.legal_moves) || [];
+    if (touchSel && legal.some(m => m.startsWith(touchSel + sq))) {
+        validateMove(touchSel + sq);   // promotion → dame automatiquement côté serveur
+        return;
+    }
+    touchSel = legal.some(m => m.startsWith(sq)) ? sq : '';
+    refreshTouchBoard();
+}
+
 function goHome()       { fetch('/cmd/home',{method:'POST'}); }
 function undoLastMove() { fetch('/api/undo',{method:'POST'}).then(()=>refreshBoard()); }
 function resetGame() {
@@ -629,10 +763,7 @@ function startGameWithColor(humanPlaysWhite) {
     }).then(r => r.json()).then(d => {
         wasGameOver = false;
         refreshBoard();
-        if (d.robot_plays_first) {
-            // Robot joue blanc → afficher le bandeau sécurité immédiatement
-            setSafetyMode(true);
-        }
+        pollStatus();
     });
 }
 function exportUsb() {
@@ -787,6 +918,7 @@ let wasGameOver   = false;
 
 function pollStatus() {
     fetch('/api/status').then(r=>r.json()).then(d=>{
+        lastStatus = d;
         if (d.status_msg) {
             document.getElementById('status').textContent = d.status_msg;
             const ls = document.getElementById('left-status');
@@ -817,14 +949,8 @@ function pollStatus() {
         // Historique
         if (d.moves) renderMoveHistory(d.moves);
 
-        // Bouton JOUER ROBOT — actif seulement quand c'est le tour du robot
-        const isRobotTurn = !d.game_over && d.robot_turn;
-        const btn = document.getElementById('btn-play-robot');
-        if (isRobotTurn && btn.classList.contains('waiting')) {
-            setSafetyMode(true);   // c'est au robot → afficher le bandeau + activer le bouton
-        } else if (!isRobotTurn && btn.classList.contains('ready')) {
-            setSafetyMode(false);  // plus au robot → désactiver
-        }
+        // Bouton principal : J'AI JOUÉ / JOUER ROBOT / robot en action
+        updateMainButton(d);
 
         // Célébration fin de partie
         if (d.game_over && !wasGameOver && d.outcome) {

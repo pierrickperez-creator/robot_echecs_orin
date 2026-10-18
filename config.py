@@ -76,6 +76,15 @@ CAMERA_HEIGHT = 480
 BOARD_PX      = 400
 BOARD_CORNERS = None          # Sera calibré avec les 4 dames noires
 
+# Détection du coup humain par comparaison de photos
+VISION_MARKERS_AT_CELL_CENTERS = True  # Calibration : 4 dames noires au centre des 4 cases d'angle (grille 10x10)
+VISION_DIFF_THRESHOLD = 18     # Écart moyen (0-255) au-delà duquel une case est "modifiée"
+VISION_SETTLE_SEC     = 1.0    # Pause après arrivée en position caméra (vibrations) avant la photo
+# Orientation : si les noms de cases de l'image de debug ne collent pas au vrai plateau
+VISION_FLIP_FILES = False      # inverse a↔h
+VISION_FLIP_RANKS = False      # inverse 1↔8
+VISION_SWAP_AXES  = False      # échange colonnes et rangées (caméra tournée de 90°)
+
 # Variables utilisées par CameraStream dans app.py
 USE_GSTREAMER  = False        # Pas de caméra CSI sur ce setup (SQ11 = USB uniquement)
 CAM_ID_MAIN    = CAMERA_USB_INDEX   # Index principal  (/dev/video0)
