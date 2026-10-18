@@ -46,9 +46,6 @@ ser = None
 serial_lock = threading.Lock()
 gcode_log_buffer = []
 status_msg = "En attente du joueur Blanc..."
-button_state        = False
-robot_move_requested = False   # True quand le bouton physique vient d'être pressé
-button_thread_running = True
 clock_enabled = True
 last_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
 cap_w = 0   # pièces blanches capturées (index cimetière)
@@ -77,15 +74,23 @@ def init_printer():
     try:
         ser = serial.Serial(config.MARLIN_PORT, config.MARLIN_BAUD, timeout=1)
         time.sleep(2)  # Attente reboot Marlin
+        ser.reset_input_buffer()
         send_gcode_raw("M92 Z400")  # Calibration Z
-        # Forcer relais OFF immédiatement dès la connexion
-        send_gcode_raw(f"M42 P{config.MAGNET_PIN} S0")
+        magnet(False)               # Forcer relais OFF immédiatement dès la connexion
         log_gcode(f"✅ Marlin connecté sur {config.MARLIN_PORT} — relais OFF")
     except Exception as e:
         log_gcode(f"ERREUR CONNEXION MARLIN : {e}")
         ser = None
 
-def send_gcode_raw(command):
+# Commandes longues : Marlin ne répond 'ok' qu'une fois terminées
+_SLOW_GCODE_TIMEOUT = {"G28": 120, "M400": 120, "G29": 300}
+
+def send_gcode_raw(command, timeout=None):
+    """
+    Envoie un GCode et attend le 'ok' de Marlin avant de rendre la main.
+    Indispensable : sans cette attente, le petit buffer série de Marlin déborde
+    et des commandes sont perdues (mouvements manquants).
+    """
     global ser
     if config.SIMULATION_MODE:
         log_gcode(f"[SIM] {command}")
@@ -93,30 +98,40 @@ def send_gcode_raw(command):
     if not ser:
         log_gcode(f"[HORS LIGNE] {command}")
         return False
+    if timeout is None:
+        timeout = _SLOW_GCODE_TIMEOUT.get(command.split()[0].upper(), 10)
     with serial_lock:
         try:
             ser.write(f"{command}\n".encode())
             log_gcode(f"[→] {command}")
-            return True
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                line = ser.readline().decode(errors='ignore').strip()
+                if line.startswith("ok"):
+                    return True
+                if line.lower().startswith("error"):
+                    log_gcode(f"[←] {line}")
+            log_gcode(f"⚠️ Pas de 'ok' de Marlin pour {command} (>{timeout}s)")
+            return False
         except Exception as e:
             log_gcode(f"Erreur envoi GCode : {e}")
             return False
 
 def send_gcode_wait(command, timeout=10):
     """Envoie un GCode et attend 'ok' de Marlin."""
-    if not send_gcode_raw(command):
-        return False
-    if config.SIMULATION_MODE:
-        return True
-    if not ser:
-        return False
-    deadline = time.time() + timeout
-    with serial_lock:
-        while time.time() < deadline:
-            line = ser.readline().decode(errors='ignore').strip()
-            if line == 'ok':
-                return True
-    return False
+    return send_gcode_raw(command, timeout)
+
+def startup_sequence():
+    """Au démarrage : homing puis position caméra."""
+    if not ser and not config.SIMULATION_MODE:
+        return
+    log_gcode("DÉMARRAGE : Homing G28...")
+    global last_position
+    if send_gcode_raw("G28"):
+        last_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        move_to_vision_position()
+    else:
+        log_gcode("⚠️ Homing non confirmé — position caméra annulée.")
 
 def move_to_vision_position():
     """Déplace la tête en position caméra : plateau reculé au max, tête levée."""
@@ -137,18 +152,16 @@ _magnet_on_since = None   # timestamp d'activation (watchdog anti-surchauffe)
 
 def magnet(state):
     """
-    Active ou désactive le relais KS0055 sur D11.
-    Utilise M42 (DIRECT_PIN_CONTROL requis dans Marlin Configuration_adv.h).
-    M42 P11 S255 → pin HIGH (5V continu) → relais ON
-    M42 P11 S0   → pin LOW  (0V)         → relais OFF
+    Active ou désactive le relais KS0055 branché sur le connecteur servo (D11).
+    Commande servo Marlin : M280 P<idx> S<valeur>.
     """
     global _magnet_on_since
-    pin = config.MAGNET_PIN
+    idx = config.MAGNET_SERVO_IDX
     if state:
-        send_gcode_raw(f"M42 P{pin} S255")
+        send_gcode_raw(f"M280 P{idx} S{config.MAGNET_SERVO_ON}")
         _magnet_on_since = time.time()
     else:
-        send_gcode_raw(f"M42 P{pin} S0")
+        send_gcode_raw(f"M280 P{idx} S{config.MAGNET_SERVO_OFF}")
         _magnet_on_since = None
 
 def magnet_watchdog():
@@ -158,9 +171,7 @@ def magnet_watchdog():
         time.sleep(2)
         if _magnet_on_since and (time.time() - _magnet_on_since) > max_on:
             log_gcode(f"⚠ RELAIS coupé automatiquement (>{max_on}s) — protection thermique")
-            idx = getattr(config, 'MAGNET_SERVO_IDX', 0)
-            send_gcode_raw(f"M280 P{idx} S0")
-            globals().update(_magnet_on_since=None)
+            magnet(False)
 
 def calculate_xy(square_name):
     """Calcule les coordonnées mm depuis une case (ex: 'e2')."""
@@ -169,34 +180,6 @@ def calculate_xy(square_name):
     x = config.BOARD_OFFSET_X + (col * config.SQUARE_SIZE_MM) + (config.SQUARE_SIZE_MM / 2)
     y = config.BOARD_OFFSET_Y + (row * config.SQUARE_SIZE_MM) + (config.SQUARE_SIZE_MM / 2)
     return x, y
-
-def is_button_pressed():
-    """Interroge Marlin via M119 pour lire l'état du bouton (endstop)."""
-    if config.SIMULATION_MODE or not ser:
-        return False
-    with serial_lock:
-        try:
-            ser.write(b"M119\n")
-            deadline = time.time() + 2
-            while time.time() < deadline:
-                line = ser.readline().decode(errors='ignore').strip()
-                if config.ENDSTOP_BUTTON_NAME in line:
-                    return "TRIGGERED" in line.upper()
-        except Exception:
-            pass
-    return False
-
-def button_poll_loop():
-    """Thread de surveillance du bouton de validation (détection de front montant)."""
-    global button_state, robot_move_requested
-    prev = False
-    while button_thread_running:
-        current = is_button_pressed()
-        if current and not prev:          # front montant → le joueur vient d'appuyer
-            robot_move_requested = True
-        button_state = current
-        prev = current
-        time.sleep(0.2)
 
 # =============================================================================
 # GESTION CAMÉRA (JETSON CSI / USB) — ROBUSTE
@@ -721,8 +704,6 @@ def api_status():
         'status_msg': status_msg,
         'time_white': round(game_engine.time_white, 1),
         'time_black': round(game_engine.time_black, 1),
-        'button_state': button_state,
-        'robot_move_requested': robot_move_requested,
         'game_over': game_engine.is_game_over(),
         'outcome': ('pat' if outcome.termination == chess.Termination.STALEMATE else outcome.result()) if outcome else None,
         'legal_moves': game_engine.get_legal_moves(),
@@ -786,7 +767,7 @@ def api_reset_board_physical():
 @app.route('/api/set_color', methods=['POST'])
 def api_set_color():
     """Choisit la couleur du joueur humain et démarre une nouvelle partie."""
-    global status_msg, robot_move_requested, cap_w, cap_b
+    global status_msg, cap_w, cap_b
     human_plays_white = bool(request.json.get('human_plays_white', True))
     config.HUMAN_PLAYS_WHITE = human_plays_white
     game_engine.reset()
@@ -885,8 +866,7 @@ def api_export_usb():
 @app.route('/api/bot_move', methods=['POST'])
 def api_bot_move():
     """Demande à Stockfish de calculer et jouer un coup."""
-    global status_msg, robot_move_requested
-    robot_move_requested = False   # consommé
+    global status_msg
     status_msg = "Stockfish réfléchit..."
     move = game_engine.compute_bot_move()
     if move:
@@ -949,8 +929,8 @@ def api_magnet():
 @app.route('/cmd/home', methods=['POST'])
 def cmd_home():
     global last_position
-    send_gcode_raw("G28")
     log_gcode("MOTEURS : Homing G28")
+    threading.Thread(target=send_gcode_raw, args=("G28",), daemon=True).start()
     last_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
     return jsonify({"status": "ok"})
 
@@ -1041,8 +1021,12 @@ def cmd_physical_move():
 
 @app.route('/emergency_stop', methods=['POST'])
 def emergency_stop():
-    send_gcode_raw("M410")
-    magnet(False)
+    # Écriture directe, sans attendre le verrou : un G28/M400 peut l'occuper longtemps
+    if ser and not config.SIMULATION_MODE:
+        try:
+            ser.write(f"M410\nM280 P{config.MAGNET_SERVO_IDX} S{config.MAGNET_SERVO_OFF}\n".encode())
+        except Exception as e:
+            log_gcode(f"Erreur arrêt d'urgence : {e}")
     log_gcode("!!! ARRÊT D'URGENCE !!!")
     return jsonify({"status": "ok"})
 
@@ -1532,7 +1516,8 @@ def api_leg_status():
 
 if __name__ == '__main__':
     init_printer()
-    threading.Thread(target=button_poll_loop,  daemon=True).start()
     threading.Thread(target=magnet_watchdog,   daemon=True).start()
     log_gcode("🚀 Serveur Robot Échecs démarré.")
+    if getattr(config, 'HOME_ON_STARTUP', True):
+        threading.Thread(target=startup_sequence, daemon=True).start()
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

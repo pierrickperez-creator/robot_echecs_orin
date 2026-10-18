@@ -81,18 +81,19 @@ USE_GSTREAMER  = False        # Pas de caméra CSI sur ce setup (SQ11 = USB uniq
 CAM_ID_MAIN    = CAMERA_USB_INDEX   # Index principal  (/dev/video0)
 CAM_ID_SECOND  = 1                  # Index secondaire (/dev/video1)
 
-# --- BOUTON DE VALIDATION (Branché sur un Endstop libre) ---
-# Valeurs possibles : "x_min", "x_max", "y_min", "y_max", "z_min", "z_max"
-ENDSTOP_BUTTON_NAME = "z_max" 
+# --- DÉMARRAGE ---
+HOME_ON_STARTUP = True    # Homing G28 puis position caméra au lancement du serveur
 
 _detected_path = shutil.which("stockfish")
 STOCKFISH_PATH = _detected_path if _detected_path else "/usr/games/stockfish"
 STOCKFISH_MOVE_TIME = 1.0
 
-# --- MARLIN BOARD PINS (M42 / M119) ---
+# --- MARLIN BOARD PINS ---
 # Ces pins se trouvent sur la carte MKS et non sur le Jetson Orin.
 # Le Jetson Orin utilise uniquement ses GPIO pour l'écran tactile.
 # Relais sur connecteur servo D11 via module KS0055, contrôlé par M280 (commande servo Marlin).
 MAGNET_PIN = 11           # gardé pour référence, non utilisé par M280
 MAGNET_SERVO_IDX = 0      # Index servo Marlin : 0 = premier servo (D11 sur RAMPS/MKS)
+MAGNET_SERVO_ON  = 180    # M280 P0 S180 → relais ON
+MAGNET_SERVO_OFF = 0      # M280 P0 S0   → relais OFF
 MAGNET_MAX_ON_SEC = 30    # Durée max d'activation avant coupure automatique (secondes)

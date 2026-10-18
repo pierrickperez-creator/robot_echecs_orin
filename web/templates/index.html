@@ -826,11 +826,6 @@ function pollStatus() {
             setSafetyMode(false);  // plus au robot → désactiver
         }
 
-        // Bouton physique pressé → déclencher le coup robot
-        if (d.robot_move_requested && isRobotTurn) {
-            playRobotMove();
-        }
-
         // Célébration fin de partie
         if (d.game_over && !wasGameOver && d.outcome) {
             wasGameOver = true;
