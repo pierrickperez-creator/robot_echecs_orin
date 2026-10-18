@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Parties Légendaires - Robot Échecs</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; margin: 0;
+               display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        .header { display: flex; align-items: center; justify-content: space-between;
+                  padding: 10px 18px; background: #1e1e1e; border-bottom: 2px solid #333; flex-shrink: 0; }
+        .header h1 { margin: 0; font-size: 1.2em; color: #f1c40f; }
+        .back-btn { padding: 7px 14px; background: #2c3e50; border: 1px solid #444;
+                    border-radius: 7px; color: white; font-size: 13px; cursor: pointer; text-decoration: none; }
+        .back-btn:hover { background: #3d5166; }
+
+        .main { display: flex; flex: 1; overflow: hidden; }
+
+        /* ─── Échiquier ─── */
+        .board-section { flex: 1; display: flex; align-items: center; justify-content: center;
+                         background: #0d0d0d; padding: 16px; }
+        .full-board {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(10, 1fr);
+            aspect-ratio: 1 / 1;
+            height: min(calc(100vh - 60px), calc(100vw - 360px));
+            background: #0d0d0d;
+            border: 1px solid #333;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .chess-area { grid-column: 2/10; grid-row: 2/10; }
+        .chess-area img { width: 100%; height: 100%; display: block; user-select: none; }
+        .gc { display: flex; align-items: center; justify-content: center;
+              font-size: 14px; border: 1px solid #1a1a1a; line-height: 1; }
+        .gc.bz  { background: #0f1f0f; color: #6baa6b; }
+        .gc.wz  { background: #1f1f0a; color: #aaa870; }
+        .gc.qb  { background: #1a0d2a; color: #cc88ff; }
+        .gc.qw  { background: #1a1a2a; color: #88aaff; }
+        .gc.used { opacity: 0.25; }
+
+        /* ─── Panneau droit ─── */
+        .side-panel { width: 340px; background: #1a1a1a; border-left: 2px solid #333;
+                      display: flex; flex-direction: column; padding: 14px; gap: 10px; overflow-y: auto; }
+
+        .turn-box { padding: 10px; border-radius: 9px; text-align: center; font-weight: bold; font-size: 0.95em; }
+        .turn-white { background: #2c3e50; border: 2px solid #ecf0f1; color: #ecf0f1; }
+        .turn-black { background: #1a1a2e; border: 2px solid #95a5a6; color: #bdc3c7; }
+        .turn-over  { background: #2c1810; border: 2px solid #e74c3c; color: #e74c3c; }
+        .turn-wait  { background: #1a1a1a; border: 2px solid #555; color: #888; }
+
+        /* Progression */
+        .progress-wrap { background: #222; border-radius: 7px; padding: 8px 12px; }
+        .progress-label { font-size: 11px; color: #888; margin-bottom: 5px; display: flex; justify-content: space-between; }
+        .progress-bar { background: #333; border-radius: 4px; height: 7px; overflow: hidden; }
+        .progress-fill { background: #f1c40f; height: 100%; width: 0%; transition: width 0.4s; }
+
+        /* Boutons contrôle */
+        .ctrl-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; }
+        button { padding: 10px 6px; border: none; border-radius: 7px; font-weight: bold;
+                 font-size: 18px; cursor: pointer; color: white; transition: 0.15s; }
+        button:active { transform: scale(0.93); }
+        .btn-play  { background: #27ae60; font-size: 14px; }
+        .btn-pause { background: #c0392b; font-size: 14px; }
+        .btn-nav   { background: #2980b9; }
+        .btn-reset { background: #555; }
+
+        /* Vitesse */
+        .speed-row { display: flex; align-items: center; gap: 9px; background: #222; border-radius: 7px; padding: 7px 11px; }
+        .speed-row label { font-size: 12px; color: #888; white-space: nowrap; }
+        .speed-row input[type=range] { flex: 1; accent-color: #f1c40f; }
+        #speed-display { font-weight: bold; color: #f1c40f; min-width: 30px; text-align: right; font-size: 12px; }
+
+        /* Liste des parties */
+        .section-title { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; }
+        .game-list { display: flex; flex-direction: column; gap: 5px; overflow-y: auto; flex-shrink: 0; }
+        .game-item { padding: 9px 12px; background: #222; border-radius: 7px; cursor: pointer;
+                     border: 2px solid transparent; transition: 0.15s; }
+        .game-item:hover { background: #2a2a2a; border-color: #444; }
+        .game-item.active { background: #192a19; border-color: #27ae60; }
+        .game-title { color: white; font-weight: bold; font-size: 12px; }
+        .game-sub   { color: #888; font-size: 10px; margin-top: 2px; }
+
+        /* Historique */
+        #move-history { background: #111; border-radius: 7px; padding: 9px; font-family: monospace;
+                        font-size: 12px; color: #7f8c8d; overflow-y: auto; line-height: 1.9; min-height: 60px; max-height: 120px; }
+
+        /* GCode log */
+        #gcode-log { background: #0d0d0d; border-radius: 7px; padding: 6px 9px;
+                     font-family: 'Courier New', monospace; font-size: 11px; color: #7f8c8d;
+                     overflow-y: auto; line-height: 1.6; min-height: 80px; max-height: 150px; }
+        #gcode-log .tx  { color: #3498db; }
+        #gcode-log .sim { color: #f39c12; }
+        #gcode-log .off { color: #888; }
+        #gcode-log .err { color: #e74c3c; }
+        #gcode-log .ok  { color: #27ae60; }
+        #move-history .w { color: #ecf0f1; }
+        #move-history .b { color: #95a5a6; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>♟ Parties Légendaires</h1>
+    <a class="back-btn" href="/">← Retour au robot</a>
+</div>
+
+<div class="main">
+    <!-- Échiquier 10×10 -->
+    <div class="board-section">
+        <div class="full-board" id="full-board">
+            <div class="chess-area">
+                <img id="leg-board" src="/leg/board.svg" alt="Légendaire">
+            </div>
+        </div>
+    </div>
+
+    <!-- Panneau droit -->
+    <div class="side-panel">
+        <div class="turn-box turn-wait" id="turn-box">Sélectionnez une partie</div>
+
+        <!-- Progression -->
+        <div class="progress-wrap">
+            <div class="progress-label">
+                <span>Coup <span id="move-index">0</span> / <span id="move-total">—</span></span>
+                <span id="game-name-label" style="color:#f1c40f;font-size:10px;max-width:150px;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">—</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        </div>
+
+        <!-- Contrôles -->
+        <div class="ctrl-grid">
+            <button class="btn-play"  onclick="startPlay()">▶ JOUER</button>
+            <button class="btn-pause" onclick="stopPlay()">⏸ PAUSE</button>
+            <button class="btn-nav"   onclick="prevMove()"  title="Coup précédent">⏮</button>
+            <button class="btn-nav"   onclick="nextMove()"  title="Coup suivant">⏭</button>
+            <button class="btn-reset" onclick="legReset()"  title="Retour au début">↺</button>
+        </div>
+
+        <!-- Vitesse -->
+        <div class="speed-row">
+            <label>Intervalle</label>
+            <input type="range" id="speed-slider" min="2" max="30" step="1" value="10"
+                   oninput="onSpeedChange(this.value)">
+            <span id="speed-display">10s</span>
+        </div>
+
+        <!-- Liste des parties -->
+        <div class="section-title">Parties</div>
+        <div class="game-list" id="game-list">Chargement...</div>
+
+        <!-- Historique -->
+        <div class="section-title">Historique</div>
+        <div id="move-history">—</div>
+
+        <!-- GCode log -->
+        <div class="section-title">GCode imprimante</div>
+        <div id="gcode-log">En attente...</div>
+    </div>
+</div>
+
+<script>
+// ─── Cimetière (même logique que simulation.html) ────────────────────────────
+const WHITE_GY = [];
+for (let r = 4; r >= 0; r--) WHITE_GY.push([0, r]);
+for (let c = 1; c <= 8; c++) WHITE_GY.push([c, 0]);
+for (let r = 0; r <= 4;  r++) WHITE_GY.push([9, r]);
+
+const BLACK_GY = [];
+for (let r = 5; r <= 9; r++) BLACK_GY.push([0, r]);
+for (let c = 1; c <= 8; c++) BLACK_GY.push([c, 9]);
+for (let r = 9; r >= 5;  r--) BLACK_GY.push([9, r]);
+
+const WHITE_QR = [[9, 4]];
+const BLACK_QR = [[9, 5]];
+
+function cellClass(c, r) {
+    if (WHITE_QR.some(([qc,qr]) => qc===c && qr===r)) return 'qw';
+    if (BLACK_QR.some(([qc,qr]) => qc===c && qr===r)) return 'qb';
+    if ((c===0 && r>=5) || r===9 || (c===9 && r>=5)) return 'bz';
+    return 'wz';
+}
+
+(function buildGrid() {
+    const container = document.getElementById('full-board');
+    for (let c = 0; c < 10; c++) {
+        for (let r = 0; r < 10; r++) {
+            if (c >= 1 && c <= 8 && r >= 1 && r <= 8) continue;
+            const div = document.createElement('div');
+            div.id = `gc-${c}-${r}`;
+            div.className = `gc ${cellClass(c, r)}`;
+            div.style.gridColumn = c + 1;
+            div.style.gridRow    = 10 - r;
+            container.appendChild(div);
+        }
+    }
+    [{c:0,r:9,t:'↖'},{c:9,r:9,t:'↗'},{c:0,r:0,t:'↙'},{c:9,r:0,t:'↘'}]
+        .forEach(({c,r,t}) => {
+            const el = document.getElementById(`gc-${c}-${r}`);
+            if (el && !el.textContent) el.textContent = t;
+        });
+})();
+
+// ─── Cimetière ────────────────────────────────────────────────────────────────
+function renderGraveyard(capW, capB) {
+    [...WHITE_GY, ...BLACK_GY, ...WHITE_QR, ...BLACK_QR].forEach(([c, r]) => {
+        const el = document.getElementById(`gc-${c}-${r}`);
+        if (el) { el.textContent = ''; el.classList.remove('used'); }
+    });
+    (capW || []).forEach((sym, i) => {
+        if (i < WHITE_GY.length) {
+            const el = document.getElementById(`gc-${WHITE_GY[i][0]}-${WHITE_GY[i][1]}`);
+            if (el) el.textContent = sym;
+        }
+    });
+    (capB || []).forEach((sym, i) => {
+        if (i < BLACK_GY.length) {
+            const el = document.getElementById(`gc-${BLACK_GY[i][0]}-${BLACK_GY[i][1]}`);
+            if (el) el.textContent = sym;
+        }
+    });
+    WHITE_QR.forEach(([c, r]) => {
+        const el = document.getElementById(`gc-${c}-${r}`);
+        if (el) el.textContent = '♕';
+    });
+    BLACK_QR.forEach(([c, r]) => {
+        const el = document.getElementById(`gc-${c}-${r}`);
+        if (el) el.textContent = '♛';
+    });
+}
+
+// ─── État ─────────────────────────────────────────────────────────────────────
+let playing      = false;
+let playTimer    = null;
+let intervalSec  = 10;
+let moveHistory  = [];
+let gameLoaded   = false;
+let gameOver     = false;
+let selectedId   = null;
+
+// ─── Chargement liste ─────────────────────────────────────────────────────────
+function loadGameList() {
+    fetch('/api/leg/games').then(r => r.json()).then(games => {
+        const el = document.getElementById('game-list');
+        el.innerHTML = '';
+        games.forEach(g => {
+            const div = document.createElement('div');
+            div.className = 'game-item';
+            div.id = `game-${g.id}`;
+            div.innerHTML = `<div class="game-title">${g.name}</div>
+                             <div class="game-sub">${g.players} — ${g.year}</div>`;
+            div.onclick = () => loadGame(g.id);
+            el.appendChild(div);
+        });
+    });
+}
+
+// ─── Charger une partie ───────────────────────────────────────────────────────
+function loadGame(id) {
+    stopPlay();
+    fetch('/api/leg/load', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    }).then(r => r.json()).then(d => {
+        if (d.status !== 'ok') { alert('Erreur : ' + d.msg); return; }
+        selectedId  = id;
+        moveHistory = [];
+        gameLoaded  = true;
+        gameOver    = false;
+        document.querySelectorAll('.game-item').forEach(el => el.classList.remove('active'));
+        const activeEl = document.getElementById(`game-${id}`);
+        if (activeEl) activeEl.classList.add('active');
+        document.getElementById('game-name-label').textContent = d.name;
+        document.getElementById('move-total').textContent = d.total;
+        updateProgress(0, d.total);
+        refreshBoard();
+        updateTurnBox('white', false, null);
+        renderHistory();
+    });
+}
+
+// ─── Lecture automatique ──────────────────────────────────────────────────────
+function startPlay() {
+    if (!gameLoaded || gameOver) return;
+    playing = true;
+    nextMove(true);  // premier coup immédiatement, les suivants avec l'intervalle
+}
+
+function stopPlay() {
+    playing = false;
+    clearTimeout(playTimer);
+}
+
+function scheduleNext() {
+    if (!playing) return;
+    clearTimeout(playTimer);
+    playTimer = setTimeout(() => nextMove(true), intervalSec * 1000);
+}
+
+// ─── Coup suivant ─────────────────────────────────────────────────────────────
+function nextMove(fromTimer = false) {
+    if (!gameLoaded || gameOver) { stopPlay(); return; }
+    fetch('/api/leg/next_move', {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.status === 'done') { stopPlay(); return; }
+        moveHistory.push({uci: d.uci, color: d.turn === 'white' ? 'b' : 'w'});
+        refreshBoard();
+        updateProgress(d.index, d.total);
+        updateTurnBox(d.turn, d.game_over, d.outcome);
+        renderHistory();
+        if (d.captured) renderGraveyard(d.captured.w, d.captured.b);
+        if (d.game_over) { gameOver = true; stopPlay(); return; }
+        if (playing) scheduleNext();
+    });
+}
+
+// ─── Coup précédent ───────────────────────────────────────────────────────────
+function prevMove() {
+    if (!gameLoaded) return;
+    stopPlay();
+    fetch('/api/leg/prev_move', {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.status === 'start') return;
+        if (moveHistory.length) moveHistory.pop();
+        gameOver = false;
+        refreshBoard();
+        updateProgress(d.index, d.total);
+        if (d.captured) renderGraveyard(d.captured.w, d.captured.b);
+        fetch('/api/leg/status').then(r => r.json()).then(s => {
+            updateTurnBox(s.turn, false, null);
+        });
+        renderHistory();
+    });
+}
+
+// ─── Retour au début ──────────────────────────────────────────────────────────
+function legReset() {
+    if (!gameLoaded) return;
+    stopPlay();
+    fetch('/api/leg/reset', {method: 'POST'}).then(r => r.json()).then(d => {
+        moveHistory = [];
+        gameOver = false;
+        refreshBoard();
+        updateProgress(0, parseInt(document.getElementById('move-total').textContent) || 0);
+        updateTurnBox('white', false, null);
+        renderHistory();
+        renderGraveyard([], []);
+    });
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────────
+function refreshBoard() {
+    document.getElementById('leg-board').src = '/leg/board.svg?t=' + Date.now();
+}
+
+function updateProgress(index, total) {
+    document.getElementById('move-index').textContent = index;
+    document.getElementById('move-total').textContent = total;
+    const pct = total > 0 ? (index / total * 100) : 0;
+    document.getElementById('progress-fill').style.width = pct + '%';
+}
+
+function updateTurnBox(turn, over, outcome) {
+    const box = document.getElementById('turn-box');
+    if (over) {
+        box.className = 'turn-box turn-over';
+        const r = {'1-0':'Victoire des Blancs 🏆','0-1':'Victoire des Noirs 🏆','1/2-1/2':'Nulle ½-½'};
+        box.textContent = r[outcome] || 'Partie terminée';
+    } else if (!gameLoaded) {
+        box.className = 'turn-box turn-wait';
+        box.textContent = 'Sélectionnez une partie';
+    } else {
+        box.className = turn === 'white' ? 'turn-box turn-white' : 'turn-box turn-black';
+        box.textContent = turn === 'white' ? '⬜ Les BLANCS jouent' : '⬛ Les NOIRS jouent';
+    }
+}
+
+function renderHistory() {
+    const el = document.getElementById('move-history');
+    if (!moveHistory.length) { el.innerHTML = '—'; return; }
+    let html = '';
+    for (let i = 0; i < moveHistory.length; i += 2) {
+        html += `<span style="color:#444">${Math.floor(i/2)+1}.</span> `;
+        html += `<span class="w">${moveHistory[i]?.uci||''}</span> `;
+        if (moveHistory[i+1]) html += `<span class="b">${moveHistory[i+1]?.uci||''}</span> `;
+        html += '<br>';
+    }
+    el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
+}
+
+function onSpeedChange(val) {
+    intervalSec = parseInt(val);
+    document.getElementById('speed-display').textContent = val + 's';
+}
+
+// ─── GCode log ────────────────────────────────────────────────────────────────
+let lastLogLen = 0;
+function pollGcodeLog() {
+    fetch('/api/gcode_log').then(r => r.json()).then(d => {
+        const logs = d.logs || [];
+        if (logs.length === lastLogLen) return;
+        lastLogLen = logs.length;
+        const box = document.getElementById('gcode-log');
+        const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 10;
+        box.innerHTML = logs.map(line => {
+            let cls = 'tx';
+            if (line.includes('[SIM]'))                               cls = 'sim';
+            else if (line.includes('[HORS LIGNE]'))                   cls = 'off';
+            else if (line.includes('ERREUR') || line.includes('!!!')) cls = 'err';
+            else if (line.includes('✅') || line.includes('OK'))      cls = 'ok';
+            return `<div class="${cls}">${line.replace(/</g,'&lt;')}</div>`;
+        }).join('');
+        if (atBottom) box.scrollTop = box.scrollHeight;
+    }).catch(() => {});
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+loadGameList();
+setInterval(pollGcodeLog, 1500);
+</script>
+</body>
+</html>

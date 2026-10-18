@@ -17,7 +17,7 @@ class ChessRobotUI(tk.Tk):
         super().__init__()
 
         self.title("Robot Echecs")
-        self.geometry("480x320") # Résolution cible (Quimat 3.5" paysage)
+        self.geometry("1024x600") # Résolution cible (écran 7" paysage)
         self.configure(bg="#222222")
         
         # Plein écran ou sans bordure (décommenter sur le Raspberry Pi / Jetson)
@@ -91,7 +91,7 @@ class ChessRobotUI(tk.Tk):
         tk.Label(black_frame, textvariable=self.time_b_str, bg="#333333", fg="#FFFFFF", font=self.clock_font).pack(pady=5)
 
         # Message de Statut (Centre)
-        self.status_label = tk.Label(self.main_frame, textvariable=self.status_msg, bg="#222222", fg="#00BFFF", font=("Arial", 16, "bold"), wraplength=460)
+        self.status_label = tk.Label(self.main_frame, textvariable=self.status_msg, bg="#222222", fg="#00BFFF", font=("Arial", 18, "bold"), wraplength=980)
         self.status_label.pack(fill=tk.BOTH, expand=True, pady=10)
 
         # Réglage ELO (Nouveau)
@@ -159,14 +159,6 @@ class ChessRobotUI(tk.Tk):
         self.log_label = tk.Label(log_frame, textvariable=self.logs_text, bg="#000000", fg="#00FF00", font=("Courier", 10), justify=tk.LEFT, anchor="nw")
         self.log_label.pack(fill=tk.BOTH, expand=True)
 
-    # --- Navigation ---
-    def show_main_view(self):
-        self.settings_frame.pack_forget()
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
-
-    def show_settings_view(self):
-        self.main_frame.pack_forget()
-        self.settings_frame.pack(fill=tk.BOTH, expand=True)
 
     # --- API Calls ---
     def send_post(self, endpoint, payload=None):
@@ -387,7 +379,7 @@ class ChessRobotUI(tk.Tk):
             res = requests.get(f"{API_BASE_URL}/api/vision_frame", timeout=1)
             if res.status_code == 200:
                 img_data = Image.open(io.BytesIO(res.content))
-                img_data = img_data.resize((320, 240)) # Adapté à l'écran 3.5"
+                img_data = img_data.resize((800, 600)) # Adapté à l'écran 7"
                 self.vision_photo = ImageTk.PhotoImage(img_data)
                 self.vision_lbl.config(image=self.vision_photo)
         except: pass
@@ -535,7 +527,7 @@ class ChessRobotUI(tk.Tk):
         
         overlay = tk.Toplevel(self)
         overlay.title("GAME OVER")
-        overlay.geometry("480x320+0+0")
+        overlay.geometry("1024x600+0+0")
         overlay.overrideredirect(True) # Plein écran sans bordures
         overlay.attributes('-topmost', True)
         
@@ -544,8 +536,8 @@ class ChessRobotUI(tk.Tk):
         
         # Message de victoire
         title_color = "#FFD700" if winner == "BLANCS" else "#FFFFFF"
-        canvas.create_text(240, 100, text="GAME OVER", font=("Arial", 30, "bold"), fill="#FF5252")
-        canvas.create_text(240, 160, text=f"VICTOIRE DES {winner} !", font=("Arial", 20, "bold"), fill=title_color)
+        canvas.create_text(512, 200, text="GAME OVER", font=("Arial", 48, "bold"), fill="#FF5252")
+        canvas.create_text(512, 300, text=f"VICTOIRE DES {winner} !", font=("Arial", 32, "bold"), fill=title_color)
         
         particles = []
         colors = ["#FF5252", "#FFEB3B", "#4CAF50", "#2196F3", "#9C27B0", "#FF9800"]
@@ -591,7 +583,7 @@ class ChessRobotUI(tk.Tk):
             overlay.destroy()
             self.cmd_reset() # On remet le plateau à zéro pour la suite
 
-        tk.Button(overlay, text="NOUVELLE PARTIE", bg="#4CAF50", fg="#FFFFFF", font=("Arial", 14, "bold"), command=close_anim).place(x=140, y=240, width=200, height=50)
+        tk.Button(overlay, text="NOUVELLE PARTIE", bg="#4CAF50", fg="#FFFFFF", font=("Arial", 18, "bold"), command=close_anim).place(x=362, y=460, width=300, height=60)
 
     def show_edit_view(self):
         self.hide_all_views()

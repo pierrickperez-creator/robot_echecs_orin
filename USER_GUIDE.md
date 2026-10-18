@@ -1,172 +1,425 @@
-# 📖 Guide Utilisateur - Robot Échec Automatisé
+# 📖 Guide Utilisateur — Robot Échecs Automatisé
 
-Ce guide vous explique comment installer et utiliser votre robot, même si vous n'êtes pas un expert en informatique. Suivez simplement les **"Missions"** ci-dessous.
+> Ce guide est écrit pour tout le monde, même sans connaissance en informatique.
+> Lisez-le du début à la fin la première fois. Ensuite, servez-vous-en comme référence.
 
 ---
 
-## 🏁 ÉTAPE 0 : Installer le "Cerveau" du Robot (Première fois)
+## 📋 Table des matières
 
-Si vous venez de changer de carte Jetson Orin ou si vous installez tout pour la première fois, suivez ce guide pas-à-pas.
+1. [Ce qu'est ce robot](#1-ce-quest-ce-robot)
+2. [Matériel nécessaire](#2-matériel-nécessaire)
+3. [Branchements](#3-branchements)
+4. [Démarrage du système](#4-démarrage-du-système)
+5. [L'interface web — Vue d'ensemble](#5-linterface-web--vue-densemble)
+6. [Jouer une partie contre le robot](#6-jouer-une-partie-contre-le-robot)
+7. [Page Simulation (jouer sans le robot physique)](#7-page-simulation-jouer-sans-le-robot-physique)
+8. [Page Parties Légendaires](#8-page-parties-légendaires)
+9. [Page Contrôle Manuel](#9-page-contrôle-manuel)
+10. [Réglages importants](#10-réglages-importants)
+11. [Sécurité](#11-sécurité)
+12. [En cas de problème](#12-en-cas-de-problème)
+13. [Installation depuis zéro](#13-installation-depuis-zéro)
 
-### ⌨️ Comment utiliser le Terminal ?
-Le "Terminal" est l'application noire où l'on tape des commandes.
-1. Appuyez simultanément sur les touches **Ctrl + Alt + T** de votre clavier pour l'ouvrir.
-2. Pour coller une commande, faites un **Clic Droit** puis **Coller**.
-3. **IMPORTANT** : Quand on vous demande votre mot de passe, tapez-le (il ne s'affiche pas à l'écran, c'est normal !) puis appuyez sur **Entrée**.
+---
 
-### 📝 Mission 1 : Préparer le terrain
-Copiez et collez cette ligne dans le terminal, puis appuyez sur **Entrée** :
+## 1. Ce qu'est ce robot
+
+Ce robot est une imprimante 3D modifiée qui joue aux échecs. À la place d'imprimer, elle déplace les pièces sur un échiquier grâce à un électro-aimant fixé sous la tête d'impression.
+
+Une caméra fixée à l'arrière de la tête d'impression permet au robot de "voir" le plateau et d'analyser les coups du joueur humain. Un cerveau électronique (le Jetson Orin) fait tourner un moteur d'échecs professionnel appelé **Stockfish**.
+
+**En résumé : vous jouez vos coups à la main sur le plateau, le robot joue les siens tout seul.**
+
+---
+
+## 2. Matériel nécessaire
+
+| Composant | Rôle |
+|-----------|------|
+| NVIDIA Jetson Orin | Le "cerveau" — fait tourner tous les programmes |
+| Imprimante 3D (DiscoEasy 200) | Le bras robotique qui déplace les pièces |
+| Carte Marlin (MKS/RAMPS) | Pilote les moteurs de l'imprimante |
+| Caméra USB | Voit le plateau pour analyser les coups |
+| Bouton physique (endstop) | Permet au joueur de valider ses coups et de déclencher le robot |
+| Échiquier + pièces | Le plateau de jeu (pièces avec socles magnétiques) |
+| Écran tactile (ou écran + clavier) | Affiche l'interface |
+
+---
+
+## 3. Branchements
+
+Branchez dans cet ordre :
+
+1. **Caméra USB** → port USB du Jetson Orin
+2. **Câble USB** entre la carte Marlin et le Jetson Orin
+3. **Bouton physique** → connecteur **Z_MAX** (fin de course Z supérieur) sur la carte Marlin
+4. **Alimentation de l'imprimante** → branchez en premier
+5. **Alimentation du Jetson Orin** → branchez en dernier
+
+> ⚠️ **Important** : Allumez toujours l'imprimante AVANT le Jetson Orin.
+
+---
+
+## 4. Démarrage du système
+
+### Démarrage automatique (normal)
+
+Quand vous allumez le Jetson Orin, **tout démarre tout seul** en 20 à 30 secondes :
+- Le serveur du robot démarre en arrière-plan
+- Le navigateur s'ouvre automatiquement en plein écran sur l'interface du robot
+
+Vous n'avez rien à faire.
+
+### Si l'interface ne s'ouvre pas
+
+Ouvrez un terminal (Ctrl+Alt+T) et tapez :
 ```bash
-sudo apt-get update && sudo apt-get install -y python3-pip git stockfish python3-tk
+sudo systemctl restart robot-echecs.service
 ```
-*(Cela installe les outils de base et Stockfish, le moteur qui calcule les coups d'échecs).*
+Puis attendez 5 secondes et actualisez le navigateur.
 
-### 📦 Mission 2 : Installer les accessoires (Bibliothèques)
-Copiez et collez cette ligne et appuyez sur **Entrée** :
+### Accéder à l'interface depuis un autre appareil
+
+Si vous avez un téléphone ou une tablette sur le même réseau Wi-Fi, tapez dans le navigateur :
+```
+http://[adresse-IP-du-Jetson]:5000
+```
+*(Vous pouvez trouver l'adresse IP en tapant `hostname -I` dans un terminal)*
+
+---
+
+## 5. L'interface web — Vue d'ensemble
+
+L'interface se compose de **4 pages** accessibles depuis le menu en haut de l'écran principal.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  ♟ Robot Échecs   [Simulation] [★ Légendaires] [Manuel] │
+├────────────────────────────┬────────────────────────────┤
+│                            │  Panneau de droite :       │
+│    Échiquier               │  - Horloges                │
+│    (avec cimetière         │  - Statut de la partie     │
+│     autour)                │  - Boutons d'action        │
+│                            │  - Historique des coups    │
+│                            │  - Log GCode               │
+└────────────────────────────┴────────────────────────────┘
+```
+
+### Le panneau de droite expliqué
+
+- **Horloges** : temps restant pour chaque joueur (si activé)
+- **Statut** : message indiquant ce qui se passe ("À vous de jouer", "Robot réfléchit..."...)
+- **Niveau ELO** : curseur de 100 (débutant) à 3200 (grand maître mondial). 500 = joueur amateur.
+- **Bouton 🤖 JOUER ROBOT** : déclenche le coup du robot (voir section Sécurité)
+- **Historique** : liste de tous les coups joués dans la partie
+- **Log GCode** : affiche en temps réel les commandes envoyées à l'imprimante
+
+---
+
+## 6. Jouer une partie contre le robot
+
+### Étape 1 — Démarrer une nouvelle partie
+
+Cliquez sur le bouton **NOUVELLE PARTIE**.
+
+Un écran de choix apparaît :
+
+```
+┌──────────────────────────────────────┐
+│         ♟ Nouvelle partie            │
+│   Quelle couleur voulez-vous jouer ? │
+│                                      │
+│  ┌──────────┐      ┌──────────┐      │
+│  │    ⬜    │      │    ⬛    │      │
+│  │  BLANCS  │      │  NOIRS   │      │
+│  │ Vous     │      │  Robot   │      │
+│  │ jouez en │      │  joue en │      │
+│  │ premier  │      │  premier │      │
+│  └──────────┘      └──────────┘      │
+└──────────────────────────────────────┘
+```
+
+- **BLANCS** : vous jouez en premier (les blancs ouvrent toujours la partie aux échecs)
+- **NOIRS** : le robot joue en premier
+
+### Étape 2 — Si vous jouez les Blancs
+
+1. Déplacez physiquement votre pièce sur le plateau
+2. **Retirez votre main** de la zone de jeu
+3. Le robot analyse votre coup via la caméra
+4. Un bandeau orange apparaît : *"Retirez vos mains — appuyez sur JOUER ROBOT"*
+5. **Vérifiez que vos mains sont bien loin du plateau**
+6. Appuyez sur **🤖 JOUER ROBOT** (ou sur le **bouton physique**)
+7. Le robot calcule et joue son coup — **ne touchez pas le plateau pendant qu'il bouge !**
+8. Répétez depuis l'étape 1
+
+### Étape 3 — Si vous jouez les Noirs
+
+Le robot joue les Blancs et commence. Dès le démarrage de la partie :
+1. Le bandeau orange apparaît automatiquement
+2. **Éloignez vos mains**
+3. Appuyez sur **🤖 JOUER ROBOT** pour que le robot joue son premier coup
+4. Ensuite, jouez votre coup et recommencez
+
+### Le bouton physique
+
+Le **bouton physique** (branché sur Z_MAX de la carte Marlin) fait exactement la même chose que le bouton **🤖 JOUER ROBOT** à l'écran. Vous pouvez utiliser l'un ou l'autre selon votre préférence.
+
+### Fin de partie
+
+Quand la partie se termine (échec et mat, pat, nulle), une animation de confettis apparaît avec le résultat :
+- **"LES BLANCS ONT GAGNÉ !"**
+- **"LES NOIRS ONT GAGNÉ !"**
+- **"PAT !"** — aucun joueur ne peut bouger mais le roi n'est pas en échec (nul)
+- **"MATCH NUL !"** — autres formes de nulle (répétition, règle des 50 coups...)
+
+Cliquez n'importe où pour fermer l'animation.
+
+### Annuler un coup
+
+Cliquez sur **ANNULER COUP** pour revenir deux demi-coups en arrière (votre coup + celui du robot).
+
+> ⚠️ Le plateau physique ne se réinitialise pas automatiquement — vous devez replacer les pièces à la main selon ce que montre l'échiquier à l'écran.
+
+### Modifier une pièce (correction d'erreur)
+
+Si la position à l'écran ne correspond pas au plateau réel (suite à une erreur de vision) :
+1. Activez le **bouton MODIFIER PIÈCE** (il devient orange)
+2. Cliquez sur la case à corriger sur l'échiquier
+3. Choisissez la pièce correcte dans le sélecteur qui apparaît
+4. Désactivez le mode modification
+
+### Exporter la partie sur clé USB
+
+1. Branchez une clé USB sur le Jetson Orin
+2. Cliquez sur **EXPORT USB**
+3. Un fichier `.pgn` (format universel des parties d'échecs) est copié sur la clé
+4. Ce fichier peut être ouvert sur Chess.com, Lichess, ou tout logiciel d'échecs
+
+---
+
+## 7. Page Simulation (jouer sans le robot physique)
+
+Accessible via le bouton **♟ Simulation** dans le menu.
+
+Cette page vous permet de jouer contre Stockfish **sans que le robot physique bouge**. Utile pour :
+- Tester votre niveau
+- Vérifier que Stockfish fonctionne
+- S'entraîner
+
+### Comment jouer en simulation
+
+1. Cliquez sur la pièce que vous voulez déplacer (elle se met en évidence)
+2. Cliquez sur la case de destination
+3. Stockfish joue automatiquement sa réponse
+
+### Régler la difficulté
+
+Le curseur **ELO Stockfish** va de 100 (très facile) à 3200 (impossible à battre). Commencez à 500 pour un défi raisonnable.
+
+---
+
+## 8. Page Parties Légendaires
+
+Accessible via le bouton **★ Légendaires** dans le menu.
+
+Cette page rejoue automatiquement les plus grandes parties de l'histoire des échecs, **coup par coup**, avec le robot physique qui déplace les pièces !
+
+### Les 6 parties disponibles
+
+| Partie | Joueurs | Année | Particularité |
+|--------|---------|-------|---------------|
+| L'Immortelle | Anderssen vs Kieseritzky | 1851 | Le sacrifice de toutes les pièces |
+| La Partie de l'Opéra | Morphy vs Duke of Brunswick | 1858 | Jouée pendant un opéra |
+| La Partie Toujours Verte | Anderssen vs Dufresne | 1852 | Combinaison finale magistrale |
+| La Partie du Siècle | Byrne vs Fischer | 1956 | Fischer avait 13 ans |
+| Fischer vs Spassky — Partie 6 | Fischer vs Spassky | 1972 | Championnat du monde |
+| L'Immortelle de Kasparov | Kasparov vs Topalov | 1999 | Le coup Rd7 légendaire |
+
+### Comment utiliser cette page
+
+1. **Sélectionnez une partie** en cliquant dessus dans la liste (elle se met en évidence)
+2. Cliquez sur **▶ JOUER** — le premier coup se joue immédiatement, puis les suivants toutes les 10 secondes
+3. Cliquez sur **⏸ PAUSE** pour mettre en pause
+4. Utilisez **⏮** et **⏭** pour reculer ou avancer d'un coup à la fois
+5. Cliquez sur **↺** pour revenir au début de la partie
+
+### Régler la vitesse
+
+Le curseur **Intervalle** permet de choisir le temps entre chaque coup (de 2 à 30 secondes).
+
+### Le cimetière
+
+Les pièces capturées apparaissent autour de l'échiquier, comme dans une vraie partie. Les blanches en bas, les noires en haut.
+
+### Le log GCode
+
+En bas du panneau, vous voyez en temps réel les commandes envoyées à l'imprimante pour chaque déplacement physique.
+
+---
+
+## 9. Page Contrôle Manuel
+
+Accessible via le bouton **🎮 Manuel** dans le menu.
+
+Cette page permet de contrôler manuellement les moteurs du robot sans jouer aux échecs. Utile pour :
+- Calibrer la position du plateau
+- Tester l'électro-aimant
+- Diagnostiquer un problème
+
+### Les contrôles disponibles
+
+**Déplacement case par case** : Cliquez sur la grille 10×10 pour envoyer la tête directement au-dessus de cette case.
+
+**Jogging fin** : Les flèches ← → ↑ ↓ déplacent la tête par petits pas (0.5mm, 1mm, 5mm ou 10mm selon le réglage).
+
+**Boutons d'action** :
+- **🏠 HOME G28** : Remet la tête en position d'origine (indispensable avant toute utilisation)
+- **📷 POSITION CAMÉRA** : Déplace la tête en position de photo (plateau reculé au maximum, tête levée à 10 cm) — utile pour vérifier que la caméra voit bien tout le plateau
+- **📌 DÉFINIR POSITION HOME** : Enregistre la position actuelle comme nouvelle origine
+- **⛔ URGENCE** : Arrêt immédiat de tous les moteurs
+
+**Aimant** : Bouton pour activer/désactiver l'électro-aimant manuellement.
+
+**Réglage Z de prise** : Ajuste la hauteur à laquelle l'aimant attrape les pièces.
+
+---
+
+## 10. Réglages importants
+
+Ces valeurs se trouvent dans le fichier `config.py`. Pour les modifier, ouvrez un terminal et tapez :
+```bash
+nano /home/pp/robot_echecs_orin/config.py
+```
+*(Ctrl+X pour quitter, Y pour sauvegarder)*
+
+### Valeurs à connaître
+
+| Variable | Valeur par défaut | Signification |
+|----------|-------------------|---------------|
+| `SIMULATION_MODE` | `False` | Mettre `True` si pas d'imprimante branchée |
+| `HUMAN_PLAYS_WHITE` | `True` | Couleur par défaut au démarrage |
+| `DEFAULT_ELO` | `500` | Niveau Stockfish par défaut |
+| `MARLIN_PORT` | `/dev/ttyUSB0` | Port USB de la carte Marlin |
+| `BOARD_OFFSET_X` | `20.0` | Position X du coin A1 de l'échiquier (mm) |
+| `BOARD_OFFSET_Y` | `20.0` | Position Y du coin A1 de l'échiquier (mm) |
+| `Z_BOARD` | `3.0` | Hauteur Z au niveau du plateau (mm) |
+| `Z_PICK_REL` | `31.0` | Hauteur de transport d'une pièce (mm) |
+| `VISION_X` | `100.0` | Position X de la tête pour la photo (mm) |
+| `VISION_Y` | `200.0` | Position Y du plateau pour la photo (max = reculé) |
+| `Z_VISION` | `100.0` | Hauteur Z pour la photo (10 cm) |
+| `ENDSTOP_BUTTON_NAME` | `z_max` | Connecteur du bouton physique sur la carte |
+
+### Calibration du plateau
+
+Si les pièces ne s'alignent pas bien avec les cases :
+1. Ouvrez la page **Contrôle Manuel**
+2. Cliquez sur la case **A1** (coin bas-gauche)
+3. Vérifiez que l'aimant est exactement centré sur la case
+4. Si décalé, modifiez `BOARD_OFFSET_X` et `BOARD_OFFSET_Y` dans `config.py`
+5. Recommencez jusqu'à l'alignement parfait
+
+---
+
+## 11. Sécurité
+
+### ⚠️ Règle absolue : ne jamais approcher les mains pendant le mouvement du robot
+
+La tête d'impression se déplace rapidement et peut blesser. Respectez toujours cette procédure :
+
+1. **Jouez votre coup**
+2. **Retirez complètement vos mains** du plateau et de la zone de jeu
+3. Attendez que le **bandeau orange** apparaisse à l'écran
+4. Appuyez sur **🤖 JOUER ROBOT** ou le **bouton physique** SEULEMENT quand vos mains sont loin
+5. **N'approchez pas** pendant que le robot bouge (attendez que le mouvement soit terminé)
+
+Le bouton **⛔ STOP D'URGENCE** arrête immédiatement tous les moteurs si nécessaire.
+
+---
+
+## 12. En cas de problème
+
+### "Le navigateur ne s'ouvre pas au démarrage"
+```bash
+sudo systemctl restart robot-echecs.service
+```
+Puis attendez 10 secondes et rouvrez le navigateur.
+
+### "L'imprimante ne répond pas / ne bouge pas"
+1. Vérifiez que le câble USB entre l'imprimante et le Jetson est bien branché
+2. Vérifiez que `MARLIN_PORT` dans `config.py` correspond au bon port :
+```bash
+ls /dev/ttyUSB*
+```
+3. Redémarrez le service
+
+### "Les navigateurs ne s'ouvrent pas"
+Ce problème arrive parfois après une mise à jour du système. Solution :
+```bash
+sudo apt install epiphany-browser
+```
+Puis utilisez Epiphany (GNOME Web) comme navigateur.
+
+### "Je tape mon mot de passe mais rien ne s'affiche"
+C'est normal sous Linux — le mot de passe ne s'affiche pas pour des raisons de sécurité. Tapez-le quand même et appuyez sur Entrée.
+
+### "Le robot déplace la pièce au mauvais endroit"
+Le plateau n'est pas bien calibré. Allez dans **Contrôle Manuel** et recalibrez `BOARD_OFFSET_X` / `BOARD_OFFSET_Y`.
+
+### "La caméra ne voit pas bien le plateau"
+1. Allez dans **Contrôle Manuel**
+2. Appuyez sur **📷 POSITION CAMÉRA**
+3. Vérifiez que toute la surface du plateau est visible dans le flux caméra
+4. Si besoin, ajustez `VISION_X`, `VISION_Y`, ou `Z_VISION` dans `config.py`
+
+### "Le bouton physique ne répond pas"
+Vérifiez que `ENDSTOP_BUTTON_NAME = "z_max"` dans `config.py` correspond bien au connecteur utilisé sur la carte Marlin.
+
+---
+
+## 13. Installation depuis zéro
+
+Cette section est pour réinstaller le robot sur un nouveau Jetson Orin.
+
+### Étape 1 — Prérequis système
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-pip git stockfish epiphany-browser wmctrl
+```
+
+### Étape 2 — Bibliothèques Python
 ```bash
 pip3 install flask pyserial python-chess opencv-python numpy Pillow requests
 ```
-*(Cela installe les petits programmes qui permettent au robot de voir, de bouger et d'afficher l'écran tactile).*
 
-*(Le robot va s'éteindre et se rallumer tout seul. C'est normal !)*
-
-### 📁 Mission 4 : Télécharger le programme du Robot
-Une fois l'écran fonctionnel, ouvrez à nouveau le terminal (**Ctrl + Alt + T**) et tapez :
+### Étape 3 — Télécharger le programme
 ```bash
+cd ~
 git clone https://github.com/pierrickperez-creator/robot_echecs_orin.git
 cd robot_echecs_orin
 ```
 
-### ⚡ Mission FINAL : Lancer le robot au démarrage
-Pour ne pas avoir à tout retaper à chaque fois :
-1. Cherchez l'application **"Startup Applications"** (ou "Applications au démarrage") dans le menu du Jetson.
-2. Cliquez sur **Add** (Ajouter).
-3. Dans "Command", tapez : `python3 /home/votre_nom/robot_echecs_orin/scripts/screen_ui.py`
-4. Enregistrez. Désormais, le robot s'allumera en même temps que la carte !
+### Étape 4 — Configurer le démarrage automatique
 
----
-
-## 🚀 Mission : Sauvegarder votre travail sur GitHub
-
-Si vous voulez mettre à jour votre compte `pierrickperez-creator` avec nos dernières modifications, suivez ces étapes :
-
-### 1. Créez le dépôt sur le site GitHub
-1. Allez sur [github.com](https://github.com) et connectez-vous.
-2. Cliquez sur le bouton vert **"New"** (Nouveau) en haut à gauche.
-3. Nommez-le exactement : `robot_echecs_orin`
-4. Laissez tout le reste par défaut et cliquez sur **"Create repository"**.
-
-### 2. Envoyez les fichiers depuis le Jetson
-Ouvrez votre terminal (**Ctrl + Alt + T**) et tapez ces lignes une par une :
-
+**Service système (démarrage du serveur Flask) :**
 ```bash
-cd robot_echecs_orin
-git init
-git add .
-git commit -m "Première version du robot autonome"
-git branch -M main
-git remote add origin https://github.com/pierrickperez-creator/robot_echecs_orin.git
-git push -u origin main
+sudo cp /home/pp/robot_echecs_orin/web/robot-echecs.service /etc/systemd/system/
+sudo systemctl enable robot-echecs.service
+sudo systemctl start robot-echecs.service
 ```
-*(GitHub vous demandera votre nom d'utilisateur et un "Token" (mot de passe spécial). C'est la seule étape un peu technique !)*
 
----
+**Ouverture automatique du navigateur :**
+```bash
+mkdir -p ~/.config/autostart
+# Le fichier robot-echecs-kiosk.desktop est déjà configuré
+```
 
-## 🆘 Dépannage pour tous
-- **"Je tape mon mot de passe mais rien ne bouge"** : C'est la sécurité Linux. Tapez quand même et appuyez sur Entrée !
-- **"L'écran tactile est tout blanc"** : Vérifiez que vous avez bien fait la **Mission 3** et que l'écran est bien clipsé.
-- **"Le robot ne bouge pas"** : Vérifiez que le câble USB entre le Jetson Orin et la carte moteur (Marlin) est bien branché.
-
----
-
-## 🛠️ 1. Installation Matérielle (Branchements)
-
-### Ordre de connexion recommandé :
-1. **Caméra** : Connectez la caméra (CSI ou USB) sur le Jetson Orin. Assurez-vous qu'elle est bien fixée sur la tête d'impression.
-2. **Carte Marlin (MKS/RAMPS)** : Reliez la carte Marlin au Jetson Orin via le câble USB.
-3. **Écran TFT** : L'écran tactile Quimat 3.5" doit être enfiché sur les ports GPIO du Jetson Orin.
-4. **Bouton Physique** : Branchez votre bouton de validation sur le port Endstop `Z_MAX` (ou celui configuré dans `config.py`) de la carte Marlin.
-5. **Alimentation** : Allumez d'abord l'alimentation du robot (moteurs), puis celle du Jetson Orin.
-
----
-
-## 🚀 2. Démarrage du Système
-
-### Mode Automatique (Recommandé)
-Le robot est configuré pour démarrer tout seul. À l'allumage du Jetson Orin :
-- Le **Backend** (Serveur Flask & Vision) démarre en arrière-plan.
-- L'**Interface Tactile** (TFT) s'affiche en plein écran après quelques secondes.
-
-### 1. Réglage ELO via Pavé Numérique
-- **Invention** : Ajout d'une interface de saisie directe `Toplevel` avec un pavé numérique optimisé pour le tactile.
-- **Bénéfice** : Permet de choisir précisément sa difficulté entre 100 (débutant) et 3200 (grand maître) sans bouton +/- fastidieux.
-
-### 2. Mode Manuel (Bac à sable) Debug)
-Si vous devez lancer les programmes manuellement via un terminal :
-1. Ouvrez un terminal dans le dossier `robot_echecs_orin`.
-2. Lancez le serveur : `python3 web/app.py`
-3. Ouvrez un deuxième terminal et lancez l'interface : `python3 scripts/screen_ui.py`
-
----
-
-## ♟️ 3. Déroulement d'une Partie
-
-### Étape 1 : Calibration (Indispensable au démarrage)
-1. L'écran affiche : **"Placer les 4 Dames Noires aux coins..."**.
-2. Placez manuellement 4 Dames Noires sur les cases de coin du plateau (0,0 ; 9,0 ; 0,9 ; 9,9).
-3. Appuyez sur le **bouton physique**.
-4. Le bras remonte en `Z=100`, prend une photo, et valide la géométrie du plateau.
-
-### Étape 2 : Votre Tour (Blancs)
-1. L'écran affiche : **"À toi de jouer"**.
-2. Déplacez votre pièce sur l'échiquier.
-3. Appuyez sur le **bouton physique**.
-4. Le bras remonte en `Z=100`, analyse votre coup et met à jour l'horloge.
-
-### Étape 3 : Niveau de l'IA (ELO)
-Avant de commencer, vous pouvez régler la force du robot :
-1. Sur l'écran d'accueil, cliquez sur le bouton **🤖 IA: XXXX**.
-2. Saisissez le niveau souhaité sur le pavé numérique (entre 100 et 3200).
-3. Appuyez sur **OK** pour valider.
-
-### Étape 4 : Tour du Robot (Noirs)
-1. L'écran affiche : **"Le robot joue..."**.
-2. Le robot calcule son coup avec Stockfish.
-3. Le bras exécute le mouvement physiquement (déplacement des pièces et gestion du cimetière).
-4. Le bras remonte une dernière fois pour vérifier sa position avant de vous redonner la main.
-
----
-
-### 🕹️ Pilotage Manuel (Mode Bac à Sable)
-Si vous souhaitez déplacer des pièces sans que l'IA ne valide les coups (pour réorganiser le plateau ou tester les actionneurs) :
-1. Allez dans **Settings** > **🕹️ Mode Manuel (Plateau)**.
-2. Touchez une pièce à déplacer (elle devient jaune).
-3. Touchez la destination (elle devient orange).
-4. Appuyez sur **VALIDER LE MOUVEMENT**. Le robot effectuera l'action physiquement.
-
-## ⚙️ 4. Réglages et Fonctions Avancées
-
-### Test de l'aimant
-Utilisez le bouton **"🧲 Aimant"** dans les réglages pour vérifier la puissance de levage.
-
-### 👁️ Vision Directe (TFT)
-Cliquez sur **👁️ Vision Directe** pour voir le flux caméra redressé directement sur l'écran tactile. Utile pour vérifier l'alignement sans PC.
-
-### 🧠 Correction de Mémoire
-Si le robot a mal interprété un coup (ex: confusion de pièce) :
-1. Cliquez sur **🧠 Corriger Plateau**.
-2. Touchez la case erronée sur l'échiquier virtuel.
-3. Sélectionnez la pièce réelle présente sur la case dans le popup.
-4. La mémoire du robot est corrigée instantanément.
-
-### 💾 Export USB des Parties
-Pour récupérer vos exploits :
-1. Branchez une clé USB sur le Jetson Orin.
-2. Cliquez sur **💾 Exporter USB**.
-3. Le fichier PGN de la partie en cours sera copié sur la clé.
-
-### En cas d'urgence
-Appuyez sur le bouton **STOP** de l'écran tactile pour couper immédiatement les mouvements moteurs.
+### Étape 5 — Vérifier l'installation
+```bash
+systemctl is-active robot-echecs.service
+```
+Si la réponse est `active`, tout fonctionne.
 
 ---
 

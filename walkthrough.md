@@ -1,114 +1,434 @@
-# Résumé des Modifications (Mars 2026)
+# Journal Technique — Robot Échecs Orin (Mars 2026)
 
-L'implémentation de la calibration et de la logique du cimetière (Graveyard) a été effectuée dans le code du Robot Échecs. 
+> Ce document est le journal chronologique de toutes les modifications apportées au projet.
+> Il est destiné aux développeurs ou à quiconque reprend le projet après une pause.
 
-## Changements Effectués
+---
 
-1. **Configuration des Steps/mm pour l'axe Z (Tiges T8)**
-   - Fichier modifié : [app.py](file:///c:/Users/PC/Downloads/Robot%20Echec-20260210T152857Z-1-001/Robot%20Echec/robot_echecs_orin/web/app.py)
-   - La fonction `init_printer()` envoie désormais automatiquement `M92 Z400` et `M500` (sauvegarde EEPROM) lors de la connexion initiale avec la carte Marlin. Cela s'assure que les nouvelles tiges T8 sont correctement calibrées sur 400 Steps/mm, même en cas de réinitialisation de la carte.
+## Session 1 : Calibration et Cimetière Dynamique (Février 2026)
 
-2. **Clarification des Offsets XY**
-   - Fichier modifié : [config.py](file:///c:/Users/PC/Downloads/Robot%20Echec-20260210T152857Z-1-001/Robot%20Echec/robot_echecs_orin/config.py)
-   - Des commentaires explicites ont été ajoutés autour des variables `BOARD_OFFSET_X` et `BOARD_OFFSET_Y` pour guider l'utilisateur. Ces valeurs déterminent la position physique exacte du centre de l'échiquier et doivent être ajustées finement sur la machine pour garantir la précision des déplacements au-dessus des cases.
+### 1.1 Calibration de l'axe Z (Tiges T8)
 
-3. **Logique Dynamique du Cimetière (Graveyard)**
-   - Fichier modifié : [app.py](file:///c:/Users/PC/Downloads/Robot%20Echec-20260210T152857Z-1-001/Robot%20Echec/robot_echecs_orin/web/app.py)
-   - La méthode de capture (`execute_move_sequence`) a été restructurée. 
-   - Désormais, le système lit l'état actuel de la partie (`game_engine.get_captured_pieces()`) pour déterminer combien de pièces de la couleur de la victime ont déjà été capturées.
-   - En fonction de ce nombre (l'index courrant), le bras robotique viendra déposer la pièce fraîchement capturée dans le bon emplacement vide, en piochant dans les tableaux `WHITE_GRAVEYARD` et `BLACK_GRAVEYARD` définis dans la configuration. Fini les dépôts statiques en `(10,10)`.
+**Fichier modifié :** `web/app.py` — fonction `init_printer()`
 
-## Ce qu'il reste à tester sur la machine physique
+La fonction envoie automatiquement `M92 Z400` + `M500` (sauvegarde EEPROM) à la connexion initiale.
+Cela garantit que les tiges T8 sont calibrées à 400 steps/mm même après réinitialisation de la carte.
 
-Il n'est pas possible de tester ce code en simulation logicielle complète, ces manipulations nécessitent le matériel :
+### 1.2 Offsets XY et configuration plateau
 
-* **[Z]** Vérifier que l'axe Z grimpe bien de 10mm réels lorsqu'on demande +10 via l'interface `/settings` (Validation du `M92 Z400`).
-* **[XY]** Déposer l'électro-aimant sur la case **A1**, en ajustant à tâtons `BOARD_OFFSET_X` et `BOARD_OFFSET_Y` dans `config.py` et en re-testant à chaque fois depuis l'interface Web en utilisant la grille 10x10 cliquable. 
-* **[Cimetière]** Jouer une pseudo-partie et capturer 2 ou 3 pièces d'affilée pour s'assurer que le bras les dispose bien consécutivement en bordure de plateau, et qu'il ne tente pas de déposer une pièce en dehors des limites physiques du plateau (200x200mm).
+**Fichier modifié :** `config.py`
 
-## Intégration de l'Écran Quimat TFT 3.5" (Nouveau Frontend)
+Variables `BOARD_OFFSET_X` et `BOARD_OFFSET_Y` pour positionner le coin A1 physique.
+Valeur par défaut = `SQUARE_SIZE_MM` (20 mm), correspondant à une case de marge en bas-gauche.
 
-Pour le remplacement de l'interface navigateur locale par un écran dédié de 3.5 pouces :
+### 1.3 Cimetière dynamique
 
-1. **Horloges et Backend API**
-   - Fichiers modifiés : [app.py](file:///c:/Users/PC/Downloads/Robot%20Echec-20260210T152857Z-1-001/Robot%20Echec/robot_echecs_orin/web/app.py) et [chess_logic.py](file:///c:/Users/PC/Downloads/Robot%20Echec-20260210T152857Z-1-001/Robot%20Echec/robot_echecs_orin/engine/chess_logic.py)
-   - L'horloge d'échec classique a été ajoutée. Elle se lance automatiquement dès qu'un joueur passe son tour. Le temps (10 minutes par joueur) s'écoule pour Blancs ou Noirs en fonction du trait affiché par le moteur.
-   - Les nouvelles URL de commandes locales telles que `/api/undo` et `/api/reset` ont été intégrées pour supporter le retour en arrière et la réinitialisation de partie.
+**Fichier modifié :** `web/app.py` — fonction `execute_move_sequence()`
 
-2. **Application Graphique (Tkinter)**
-   - Fichier créé : [screen_ui.py](file:///c:/Users/PC/Downloads/Robot%20Echec-20260210T152857Z-1-001/Robot%20Echec/robot_echecs_orin/scripts/screen_ui.py)
-   - Conçu spécifiquement pour une résolution 480x320/320x480, un script `screen_ui.py` a été développé. Il affiche :
-     * Les compteurs de l'Horloge actualisés deux fois par seconde avec appels à `/api/status`.
-     * Des boutons majeurs (Undo, Nouvelle Partie, Stop).
-     * Un onglet **Paramètres** conservant les actions manuelles (Jogging X/Y/Z) et le log G-Code direct.
-   - Idéal pour fonctionner au démarrage du Jetson en plein écran (Kiosk mode) via *Pygame/Tkinter* tout en utilisant la communication locale `http://localhost:5000`.
+Le système lit le nombre de pièces déjà capturées par couleur pour déposer chaque nouvelle pièce
+au bon emplacement dans `WHITE_GRAVEYARD` / `BLACK_GRAVEYARD` (tableaux définis dans `config.py`).
 
-## Vision par Ordinateur et Flux de Jeu Automatisé
+---
 
-L'étape ultime pour rendre le robot autonome sans interface web a été franchie avec l'intégration de la vision par ordinateur et du bouton physique de validation.
+## Session 2 : Interface Web (Écran TFT, Vision, Horloges)
 
-1. **Moteur de Vision (`vision_engine.py`)** 👁️
-   - Un tout nouveau moteur basé sur **OpenCV** a été créé. Il permet de "redresser" l'image de la caméra pour obtenir une vue du dessus parfaite de l'échiquier.
-   - **Calibration Physique** : Plus besoin de cliquer dans l'interface ! Il suffit de placer **4 Dames Noires** aux 4 coins du plateau (emplacements 0,0 ; 9,0 ; 0,9 ; 9,9) et d'appuyer sur le bouton physique. Le robot détectera automatiquement les coins.
-   - **Détection des Coups** : Le système compare une photo prise avant et après votre mouvement pour identifier les cases qui ont changé de couleur, en déduisant ainsi votre coup (ex: e2 vers e4).
+### 2.1 Horloges d'échecs classiques
 
-2. **Validation par Bouton Physique (M119)** 🕹️
-   - Pour un feeling plus "arcade" et moins tactile, un bouton branché sur un port Endstop libre de la carte MKS (par défaut `X_MAX`) sert de validation.
-   - Le backend scrute l'état des fins de course via la commande G-Code **`M119`**. Dès que vous appuyez sur le bouton, l'analyse de vision se lance.
+**Fichiers modifiés :** `web/app.py`, `engine/chess_logic.py`
 
-3. **Flux de Jeu Séquentiel** 🏁
-   - **Interface TFT** : L'écran affiche des messages clairs : *"À toi de jouer"*, *"Analyse du coup..."*, *"Le robot joue..."*.
-   - **Vérification** : Après avoir déplacé une pièce, le robot prend systématiquement une photo de vérification pour s'assurer que le plateau est stable avant de vous redonner la main.
+Horloge de 10 min par joueur, déclenchée automatiquement à chaque changement de trait.
 
-4. **Aperçu Vision en Temps Réel (Debug AI)** 📺
-   - Dans les réglages de l'interface Web, un nouveau flux **"Identification des Pièces (Vision AI)"** a été ajouté.
-   - Il affiche le plateau redressé avec des étiquettes dynamiques sur chaque case identifiant la pièce (ex: *Cavalier*, *Tour*) selon son socle.
+### 2.2 Application TFT Tkinter
 
-4. **Reconnaissance des Socles (Identité des Pièces)** 🧩
-   - Grâce à vos précisions sur les formes des socles, le système a été amélioré pour identifier le type de pièce qui arrive sur une case :
-     * **Triangle** ➡️ Cavalier
-     * **Hexagone** ➡️ Tour
-     * **Carré** ➡️ Dame
-     * **Étoile/Rond/Cœur** ➡️ Identifiés par le nombre de côtés.
-   - Cette fonctionnalité permet au robot de valider que vous avez bien déplacé la pièce prévue par les règles du jeu, ajoutant une couche de sécurité contre les erreurs.
+**Fichier créé :** `scripts/screen_ui.py`
 
-### 5. Test de Puissance de l'Électro-aimant 🧲
-   - Un bouton de test manuel a été ajouté sur l'écran **TFT** (onglet Settings) et sur l'**interface Web**.
-   - Il permet d'allumer/éteindre l'aimant à la demande pour vérifier qu'il est capable de soulever vos pièces d'échecs avant de lancer une partie.
+Interface graphique pour écran Quimat 3.5" (480×320). Affiche horloges, boutons d'action,
+log GCode. Se connecte en HTTP local à `http://localhost:5000`.
 
+### 2.3 Moteur de vision OpenCV
 
-### 4. Recul Automatique de la Tête (Z+100mm) 🏗️
-   - Comme la caméra est fixée sur la tête d'impression, celle-ci doit s'écarter pour que la caméra puisse voir l'intégralité du plateau 10x10.
-   - Avant chaque prise de photo, le robot effectue désormais une séquence automatique :
-     1. Déplacement au centre du plateau (`X=100, Y=100`).
-     2. Remontée à la hauteur de vision (`Z=100`).
-     3. Pause de 1 seconde pour stabiliser l'image.
-   - Cette logique est intégrée dans toutes les phases critiques (Calibration, Tour Humain, Vérification Robot).
+**Fichier créé :** `engine/vision_engine.py`
 
-## 🕹️ Avancées Mars 2026 : Interface Autonome Professionnelle
+- Redressement de l'image par homographie (4 dames noires aux coins = calibration)
+- Détection des coups : comparaison avant/après la photo
+- Identification des pièces par forme de socle (triangle = cavalier, hexagone = tour…)
 
-### 1. Célébration de Fin de Partie (Animation Fun) 🎉
-- **Nouveauté** : Dès que l'IA détecte un échec et mat ou une pat, l'écran tactile s'illumine avec une explosion de confettis et d'emojis (🏆, 🔥, 🎉).
-- **Fonctionnement** : Un canevas d'animation fluide a été intégré directement dans Tkinter, signifiant la victoire des Blancs ou des Noirs de manière festive.
+---
 
-### 2. Réglage ELO via Pavé Numérique
-- **Fichiers modifiés** : `web/app.py`, `scripts/screen_ui.py`
-- **Fonctionnement** : Un échiquier interactif complet (64 cases + 36 slots de cimetière + réserves) permet de piloter physiquement l'aimant d'un point A vers un point B par simple toucher. Idéal pour recalibrer manuellement ou simuler des coups sans validation de l'IA.
+## Session 3 : Mars 2026 — Refonte Majeure
 
-### 3. Vision Directe TFT 👁️
-- **Invention** : Utilisation de la bibliothèque `Pillow` pour convertir le flux camera OpenCV en images compatibles Tkinter.
-- **Bénéfice** : Vous voyez ce que le robot voit (plateau redressé, détection des pièces) à 5 FPS directement sur le petit écran Quimat. Fini le besoin d'ouvrir un navigateur sur un PC portable pour vérifier l'alignement.
+Cette session correspond aux modifications réalisées lors de la mise en service physique du robot.
+Elle est documentée en détail ci-dessous.
 
-### 3. Correction de Mémoire IA 🧠
-- **Problème résolu** : Permet de corriger les erreurs rares de vision sans avoir à recommencer la partie.
-- **Interface** : Un clic sur une case ouvre un sélecteur de pièces. La modification met à jour instantanément l'état du moteur `chess.Board` et le PGN.
+---
 
-### 4. Export USB des Parties 💾
-- **Intégration** : Scrutage automatique des ports USB montés sur le Jetson Orin.
-- **Résultat** : En un clic, le robot génère et copie un fichier `.pgn` complet de la partie sur votre clé USB, prêt pour l'analyse sur Chess.com ou Lichess.
+### 3.1 Résolution de la panne du navigateur (snap cassé)
 
-> [!TIP]
-> Ces outils de diagnostic et d'administration font du robot un système "Stand-alone" robuste et facile à maintenir sur le terrain.
+**Problème :** Après une mise à jour du kernel Jetson (5.15.148-tegra), tous les navigateurs
+installés via snap refusaient de se lancer. Erreur : `cap_dac_override: Function not implemented`
+dans `/usr/lib/snapd/snap-confine`.
+
+**Solution retenue :** Installer `epiphany-browser` (GNOME Web) via `apt` — sans snap.
+
+```bash
+sudo apt install epiphany-browser
+```
+
+**Fichiers mis à jour :**
+
+- `~/.config/autostart/robot-echecs-kiosk.desktop` — Exec changé pour `epiphany-browser http://localhost:5000`
+- `~/Desktop/Robot-Echecs.desktop` — idem
+
+**Note :** Les flags `--application-mode --profile` d'Epiphany provoquaient un crash au démarrage
+(race condition GNOME). Ils ont été supprimés. Epiphany s'ouvre désormais en fenêtre standard,
+puis le service systemd attend 3 secondes et envoie `wmctrl -r :ACTIVE: -b add,fullscreen`.
+
+---
+
+### 3.2 Auto-déverrouillage du trousseau GNOME (mot de passe au démarrage)
+
+**Problème :** Une fenêtre demandant le mot de passe du trousseau GNOME apparaissait à chaque
+démarrage, bloquant l'expérience kiosque.
+
+**Solution :** Créer un trousseau avec mot de passe vide via `python-secretstorage` :
+
+```python
+import secretstorage
+bus = secretstorage.dbus_init()
+col = secretstorage.get_default_collection(bus)
+col.unlock()
+```
+
+Lancé une fois manuellement. Le trousseau est ensuite déverrouillé automatiquement.
+
+---
+
+### 3.3 Correction du panneau GCode (mode hors ligne)
+
+**Problème :** Le panneau GCode de l'interface web n'affichait que les coups d'échecs (en notation UCI)
+et pas les véritables commandes GCode envoyées à l'imprimante.
+
+**Cause :** La fonction `send_gcode_raw()` dans `app.py` ne loguait les commandes que dans
+`SIMULATION_MODE = True`. En mode réel sans imprimante connectée (`ser is None`), rien n'était
+loggué.
+
+**Correction dans `web/app.py` :**
+
+```python
+def send_gcode_raw(cmd):
+    if ser:
+        ser.write((cmd + "\n").encode())
+        # ... lecture réponse ...
+    else:
+        log_gcode(f"[HORS LIGNE] {cmd}")  # ← ajouté
+```
+
+---
+
+### 3.4 Affichage du vainqueur dans la célébration (confettis)
+
+**Problème :** L'écran de fin de partie avec confettis n'indiquait pas qui avait gagné.
+
+**Corrections :**
+
+**Backend (`web/app.py`) :** L'endpoint `/api/status` renvoyait `str(outcome)` (représentation Python)
+au lieu du résultat. Corrigé pour renvoyer `outcome.result()` (`'1-0'`, `'0-1'`, `'1/2-1/2'`) ou
+`'pat'` pour les pats (stalemate).
+
+```python
+if board.is_stalemate():
+    outcome_str = 'pat'
+else:
+    outcome_str = board.outcome().result()  # '1-0' / '0-1' / '1/2-1/2'
+```
+
+**Frontend (`web/templates/index.html`) :** Table de traduction des résultats :
+
+```javascript
+const VICTORY_TEXTS = {
+    '1-0':     'LES BLANCS ONT GAGNÉ !',
+    '0-1':     'LES NOIRS ONT GAGNÉ !',
+    'pat':     'PAT !',
+    '1/2-1/2': 'MATCH NUL !',
+};
+```
+
+---
+
+### 3.5 Nouvelle page : Parties Légendaires
+
+**Fichier créé :** `web/templates/legendaires.html`
+**Fichier modifié :** `web/app.py` (ajout de toutes les routes `/legendaires` et `/api/leg/*`)
+
+#### 3.5.1 Les 6 parties intégrées
+
+Stockées dans `LEGENDARY_GAMES` (liste de dicts) dans `app.py` avec leur PGN complet :
+
+| ID | Nom | Joueurs | Année |
+|----|-----|---------|-------|
+| immortal | L'Immortelle | Anderssen vs Kieseritzky | 1851 |
+| opera | La Partie de l'Opéra | Morphy vs Duke of Brunswick | 1858 |
+| evergreen | La Partie Toujours Verte | Anderssen vs Dufresne | 1852 |
+| century | La Partie du Siècle | Byrne vs Fischer | 1956 |
+| fischer_spassky | Fischer vs Spassky (partie 6) | Fischer vs Spassky | 1972 |
+| kasparov | L'Immortelle de Kasparov | Kasparov vs Topalov | 1999 |
+
+#### 3.5.2 Architecture backend
+
+Variables d'état globales :
+
+```python
+leg_game_id    = None   # ID de la partie chargée
+leg_moves      = []     # Liste des coups (objets chess.Move)
+leg_index      = 0      # Index du coup actuel
+leg_board      = None   # Échiquier python-chess
+leg_cap_w      = 0      # Compteur pièces blanches capturées
+leg_cap_b      = 0      # Compteur pièces noires capturées
+```
+
+Fonction `_parse_legendary_pgn(pgn_str)` : parse le PGN et retourne la liste des coups.
+
+Fonction `execute_leg_move_sequence(move, board_before)` : génère et envoie le GCode physique
+pour chaque coup légendaire (identique à `execute_move_sequence` mais avec ses propres compteurs).
+
+Helper `_leg_captured(color)` : retourne le prochain emplacement de cimetière pour une pièce capturée.
+
+#### 3.5.3 Bug critique corrigé : décorateur sur la mauvaise fonction
+
+Lors de l'ajout de `_leg_captured()` par édition, le décorateur `@app.route('/api/leg/next_move')`
+s'était retrouvé attaché à `_leg_captured` au lieu de `api_leg_next_move`. Résultat : la route
+renvoyait des données invalides, l'historique affichait "undefined".
+
+**Correction :** réordonner le code pour que `_leg_captured()` soit défini *avant* le décorateur :
+
+```python
+def _leg_captured(color):
+    ...
+
+@app.route('/api/leg/next_move', methods=['POST'])
+def api_leg_next_move():
+    ...
+```
+
+#### 3.5.4 Minuteur et boutons Play/Pause séparés
+
+**Problème de timing :** Le premier coup ne jouait qu'après le délai initial. Les coups suivants
+attendaient le bon délai mais l'intervalle ne s'appliquait qu'aux coups des Noirs.
+
+**Solution JS dans `legendaires.html` :**
+
+```javascript
+function startPlay() {
+    playing = true;
+    nextMove(true);        // ← premier coup immédiat
+    // scheduleNext() est appelé à l'intérieur de nextMove() si playing = true
+}
+
+function scheduleNext() {
+    clearTimeout(playTimer);
+    if (playing) {
+        playTimer = setTimeout(() => nextMove(true), intervalMs);
+    }
+}
+```
+
+Deux boutons séparés (`▶ JOUER` et `⏸ PAUSE`) plutôt qu'un toggle.
+
+#### 3.5.5 Cimetière sur la page légendaires
+
+La grille 10×10 (`#graveyard-grid`) affiche les 64 cases d'échiquier + 36 slots de cimetière.
+`renderGraveyard(data)` colore les cases capturées en bleu (noires) ou vert (blanches).
+
+#### 3.5.6 Log GCode sur la page légendaires
+
+Polling toutes les 1,5 s vers `/api/gcode_log` (même endpoint que la page principale).
+
+---
+
+### 3.6 Sécurité : déclenchement manuel du robot
+
+**Problème de sécurité :** En mode automatique, le robot se déplaçait dès qu'un coup était détecté,
+sans vérifier que le joueur avait retiré ses mains du plateau. Risque de collision.
+
+**Solution :** Le robot ne joue que lorsque le joueur appuie explicitement sur le bouton.
+
+#### 3.6.1 Variables d'état ajoutées dans `app.py`
+
+```python
+button_state         = False  # état courant du bouton physique
+robot_move_requested = False  # flag edge rising (montant) du bouton
+```
+
+#### 3.6.2 Détection de front montant (bouton physique)
+
+Le thread `button_poll_loop` tourne en arrière-plan et détecte le front montant :
+
+```python
+def button_poll_loop():
+    global button_state, robot_move_requested
+    prev = False
+    while button_thread_running:
+        current = is_button_pressed()
+        if current and not prev:          # front montant = pression
+            robot_move_requested = True
+        button_state = current
+        prev = current
+        time.sleep(0.2)
+```
+
+`is_button_pressed()` envoie `M119` à Marlin et parse la réponse pour `z_max: TRIGGERED`.
+
+#### 3.6.3 Champ `robot_turn` dans `/api/status`
+
+```python
+robot_turn = (game_engine.board.turn == chess.WHITE) != config.HUMAN_PLAYS_WHITE
+```
+
+(XOR logique : c'est le tour du robot si le tour actuel de l'échiquier n'est PAS la couleur humaine)
+
+#### 3.6.4 Endpoint `/api/bot_move` sécurisé
+
+Le robot ne joue que si `robot_turn` est True. Après avoir joué, `robot_move_requested = False`.
+
+#### 3.6.5 UI de sécurité dans `index.html`
+
+Bandeau orange animé quand c'est le tour du robot :
+
+```html
+<div id="safety-banner" style="display:none">
+  ⚠️ Retirez vos mains — Appuyez sur JOUER ROBOT
+</div>
+```
+
+Bouton JOUER ROBOT :
+- Classe `ready` (vert pulsant) quand c'est le tour du robot
+- Classe `waiting` (gris, `cursor: not-allowed`) sinon
+
+```css
+@keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 8px #27ae60aa; }
+    50%       { box-shadow: 0 0 24px #27ae6088; }
+}
+#btn-play-robot.ready {
+    background: #27ae60;
+    animation: pulse-green 1.2s infinite;
+}
+#btn-play-robot.waiting { background: #555; cursor: not-allowed; }
+```
+
+Le polling JS vérifie aussi `robot_move_requested` : si le bouton physique a été pressé,
+`playRobotMove()` est appelé automatiquement.
+
+---
+
+### 3.7 Choix de la couleur au démarrage de la partie
+
+**Fichier modifié :** `web/templates/index.html`, `web/app.py`
+
+#### 3.7.1 Route `/api/set_color`
+
+```python
+@app.route('/api/set_color', methods=['POST'])
+def set_color():
+    data = request.json
+    config.HUMAN_PLAYS_WHITE = data.get('human_plays_white', True)
+    # reset de la partie
+    ...
+```
+
+#### 3.7.2 Modal de choix de couleur (HTML/CSS)
+
+Affiché par `resetGame()` à la place du `confirm()` précédent :
+
+```html
+<div id="color-modal">
+  <h2>♟ Nouvelle partie</h2>
+  <p>Quelle couleur voulez-vous jouer ?</p>
+  <button onclick="startGameWithColor(true)">⬜ BLANCS — Vous jouez en premier</button>
+  <button onclick="startGameWithColor(false)">⬛ NOIRS — Le robot joue en premier</button>
+</div>
+```
+
+Si le joueur choisit Noirs : `config.HUMAN_PLAYS_WHITE = False`, la page charge automatiquement
+en mode "robot joue en premier" avec le bandeau de sécurité activé.
+
+---
+
+### 3.8 Position caméra configurable
+
+**Problème :** La caméra est fixée à l'arrière de la tête d'impression. Pour photographier
+l'intégralité du plateau, la tête doit se lever à 10 cm et le plateau doit reculer au maximum.
+
+**Fichier modifié :** `config.py`
+
+```python
+VISION_X  = 100.0        # mm — tête centrée horizontalement
+VISION_Y  = BED_SIZE_MM  # mm — plateau reculé au maximum (200 mm)
+Z_VISION  = 100.0        # mm — hauteur de la tête (10 cm de recul)
+```
+
+**Fichier modifié :** `web/app.py`
+
+Fonction ajoutée :
+
+```python
+def move_to_vision_position():
+    log_gcode(f"→ Position caméra : X{config.VISION_X} Y{config.VISION_Y} Z{config.Z_VISION}")
+    move_xyz(config.VISION_X, config.VISION_Y, config.Z_VISION)
+```
+
+Appelée à la fin de `execute_move_sequence()` pour que le robot se positionne pour la photo
+après chaque coup joué.
+
+---
+
+### 3.9 Bouton 📷 POSITION CAMÉRA dans le Contrôle Manuel
+
+**Fichier modifié :** `web/templates/controle_manuel.html`
+
+Route ajoutée dans `app.py` :
+
+```python
+@app.route('/cmd/goto_vision', methods=['POST'])
+def cmd_goto_vision():
+    move_to_vision_position()
+    return jsonify({'status': 'ok'})
+```
+
+Bouton violet dans l'interface :
+
+```html
+<button class="btn-purple" onclick="gotoVision()">📷 POSITION CAMÉRA</button>
+```
+
+Utile pour vérifier que la caméra voit bien l'intégralité du plateau avant de démarrer une partie.
+
+---
+
+## Récapitulatif des fichiers modifiés (Mars 2026)
+
+| Fichier | Nature des modifications |
+|---------|--------------------------|
+| `config.py` | Ajout `VISION_X`, `VISION_Y`, `Z_VISION` |
+| `web/app.py` | GCode hors-ligne, sécurité bouton, choix couleur, position caméra, parties légendaires (routes + logique), correction résultat fin de partie |
+| `web/templates/index.html` | Modal couleur, UI sécurité (bandeau + bouton pulsant), textes victoire |
+| `web/templates/legendaires.html` | Nouvelle page (créée de zéro) |
+| `web/templates/controle_manuel.html` | Bouton 📷 POSITION CAMÉRA |
+| `~/.config/autostart/robot-echecs-kiosk.desktop` | Passage à epiphany-browser |
+| `~/Desktop/Robot-Echecs.desktop` | Passage à epiphany-browser |
+| `USER_GUIDE.md` | Réécriture complète pour non-techniciens |
+
+---
+
+## Points à tester sur la machine physique
+
+- [ ] **Calibration plateau** : vérifier que l'aimant s'aligne sur A1 avec `BOARD_OFFSET_X/Y`
+- [ ] **Position caméra** : bouton 📷 → vérifier que tout le plateau est visible
+- [ ] **Bouton physique** : presser l'endstop Z_MAX → le robot doit jouer
+- [ ] **Sécurité** : le robot ne doit PAS jouer automatiquement sans pression du bouton
+- [ ] **Parties légendaires** : tester avec robot branché que les GCode s'exécutent bien
+- [ ] **Cimetière légendaires** : capturer des pièces et vérifier le placement physique
+- [ ] **Choix de couleur** : tester que "Noirs" force le robot à jouer en premier
 
 ---
 

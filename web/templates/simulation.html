@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Simulation - Robot Échecs</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; margin: 0;
+               display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        /* Header */
+        .header { display: flex; align-items: center; justify-content: space-between;
+                  padding: 10px 18px; background: #1e1e1e; border-bottom: 2px solid #333; flex-shrink: 0; }
+        .header h1 { margin: 0; font-size: 1.2em; color: #f1c40f; }
+        .back-btn { padding: 7px 14px; background: #2c3e50; border: 1px solid #444;
+                    border-radius: 7px; color: white; font-size: 13px; cursor: pointer; text-decoration: none; }
+        .back-btn:hover { background: #3d5166; }
+
+        /* Layout principal */
+        .main { display: flex; flex: 1; overflow: hidden; }
+
+        /* ─── Grille 10×10 (même logique que index.html) ─── */
+        .board-section { flex: 1; display: flex; align-items: center; justify-content: center;
+                         background: #0d0d0d; padding: 16px; }
+        .full-board {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(10, 1fr);
+            aspect-ratio: 1 / 1;
+            height: min(calc(100vh - 60px), calc(100vw - 360px));
+            background: #0d0d0d;
+            border: 1px solid #333;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .chess-area { grid-column: 2/10; grid-row: 2/10; }
+        .chess-area img { width: 100%; height: 100%; display: block; cursor: pointer; user-select: none; }
+        .gc { display: flex; align-items: center; justify-content: center;
+              font-size: 14px; border: 1px solid #1a1a1a; line-height: 1; }
+        .gc.bz  { background: #0f1f0f; color: #6baa6b; }
+        .gc.wz  { background: #1f1f0a; color: #aaa870; }
+        .gc.qb  { background: #1a0d2a; color: #cc88ff; }
+        .gc.qw  { background: #1a1a2a; color: #88aaff; }
+        .gc.used { opacity: 0.25; }
+
+        /* Panneau droit */
+        .side-panel { width: 340px; background: #1a1a1a; border-left: 2px solid #333;
+                      display: flex; flex-direction: column; padding: 14px; gap: 10px; overflow-y: auto; }
+
+        /* Tour */
+        .turn-box { padding: 12px; border-radius: 9px; text-align: center; font-weight: bold; font-size: 1em; transition: 0.3s; }
+        .turn-white { background: #2c3e50; border: 2px solid #ecf0f1; color: #ecf0f1; }
+        .turn-black { background: #1a1a2e; border: 2px solid #95a5a6; color: #bdc3c7; }
+        .turn-over  { background: #2c1810; border: 2px solid #e74c3c; color: #e74c3c; }
+
+        /* Info */
+        .move-info { background: #222; border-radius: 7px; padding: 8px 12px; font-size: 12px; color: #aaa; }
+        .move-info span { color: white; font-weight: bold; }
+
+        /* ELO */
+        .elo-row { display: flex; align-items: center; gap: 9px; background: #222; border-radius: 7px; padding: 7px 11px; }
+        .elo-row label { font-size: 12px; color: #888; white-space: nowrap; }
+        .elo-row input[type=range] { flex: 1; accent-color: #e74c3c; }
+        #sim-elo-display { font-weight: bold; color: #e74c3c; min-width: 36px; text-align: right; font-size: 12px; }
+
+        /* Boutons */
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+        button { padding: 12px; border: none; border-radius: 7px; font-weight: bold;
+                 font-size: 13px; cursor: pointer; color: white; transition: 0.15s; }
+        button:active { transform: scale(0.95); }
+        .btn-green { background: #27ae60; }
+        .btn-blue  { background: #2980b9; }
+        .btn-gray  { background: #555; }
+        .btn-span2 { grid-column: span 2; background: #c0392b; }
+
+        /* Historique */
+        .section-title { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; }
+        #move-history { background: #111; border-radius: 7px; padding: 9px; font-family: monospace;
+                        font-size: 12px; color: #7f8c8d; flex: 1; overflow-y: auto; line-height: 1.9; min-height: 80px; }
+        #move-history .w { color: #ecf0f1; }
+        #move-history .b { color: #95a5a6; }
+
+        /* IA pensée */
+        #thinking { display: none; text-align: center; color: #f1c40f; font-size: 12px;
+                    padding: 5px; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>♟ Simulation — Test Stockfish</h1>
+    <a class="back-btn" href="/">← Retour au robot</a>
+</div>
+
+<div class="main">
+    <!-- Échiquier + Cimetière 10×10 -->
+    <div class="board-section">
+        <div class="full-board" id="full-board">
+            <div class="chess-area">
+                <img id="sim-board" src="/sim/board.svg" alt="Simulation" onclick="onBoardClick(event)">
+            </div>
+        </div>
+    </div>
+
+    <!-- Panneau droit -->
+    <div class="side-panel">
+        <div class="turn-box turn-white" id="turn-box">⬜ Tour des BLANCS (vous)</div>
+
+        <div class="move-info">
+            Coups : <span id="move-count">0</span> &nbsp;|&nbsp;
+            Sélectionné : <span id="selected-display">—</span>
+        </div>
+
+        <div id="thinking">⏳ Stockfish réfléchit...</div>
+
+        <div class="elo-row">
+            <label>ELO Stockfish</label>
+            <input type="range" id="sim-elo-slider" min="100" max="3200" step="100" value="500"
+                   oninput="onSimEloChange(this.value)">
+            <span id="sim-elo-display">500</span>
+        </div>
+
+        <div class="btn-grid">
+            <button class="btn-green" onclick="simReset()">NOUVELLE PARTIE</button>
+            <button class="btn-blue"  onclick="simUndo()">ANNULER COUP</button>
+            <button class="btn-gray"  onclick="simExportUsb()">EXPORT USB</button>
+            <button class="btn-span2" onclick="simReset()">RECOMMENCER</button>
+        </div>
+
+        <div class="section-title">Historique des coups</div>
+        <div id="move-history">—</div>
+    </div>
+</div>
+
+<script>
+// ─── Cimetière (miroir de config.py — 1 dame par couleur) ─────────────────
+const WHITE_GY = [];
+for (let r = 4; r >= 0; r--) WHITE_GY.push([0, r]);
+for (let c = 1; c <= 8; c++) WHITE_GY.push([c, 0]);
+for (let r = 0; r <= 4;  r++) WHITE_GY.push([9, r]);
+
+const BLACK_GY = [];
+for (let r = 5; r <= 9; r++) BLACK_GY.push([0, r]);
+for (let c = 1; c <= 8; c++) BLACK_GY.push([c, 9]);
+for (let r = 9; r >= 5;  r--) BLACK_GY.push([9, r]);
+
+const WHITE_QR = [[9, 4]];   // I4 — dame blanche de promotion
+const BLACK_QR = [[9, 5]];   // I5 — dame noire de promotion
+
+function cellClass(c, r) {
+    if (WHITE_QR.some(([qc,qr]) => qc===c && qr===r)) return 'qw';
+    if (BLACK_QR.some(([qc,qr]) => qc===c && qr===r)) return 'qb';
+    if ((c===0 && r>=5) || r===9 || (c===9 && r>=5)) return 'bz';
+    return 'wz';
+}
+
+(function buildGrid() {
+    const container = document.getElementById('full-board');
+    for (let c = 0; c < 10; c++) {
+        for (let r = 0; r < 10; r++) {
+            if (c >= 1 && c <= 8 && r >= 1 && r <= 8) continue;
+            const div = document.createElement('div');
+            div.id = `gc-${c}-${r}`;
+            div.className = `gc ${cellClass(c, r)}`;
+            div.style.gridColumn = c + 1;
+            div.style.gridRow    = 10 - r;
+            container.appendChild(div);
+        }
+    }
+    // Coins repères
+    [{c:0,r:9,t:'↖'},{c:9,r:9,t:'↗'},{c:0,r:0,t:'↙'},{c:9,r:0,t:'↘'}]
+        .forEach(({c,r,t}) => {
+            const el = document.getElementById(`gc-${c}-${r}`);
+            if (el && !el.textContent) el.textContent = t;
+        });
+})();
+
+function renderGraveyard(capW, capB) {
+    [...WHITE_GY, ...BLACK_GY, ...WHITE_QR, ...BLACK_QR].forEach(([c,r]) => {
+        const el = document.getElementById(`gc-${c}-${r}`);
+        if (el) { el.textContent = ''; el.classList.remove('used'); }
+    });
+    (capW || []).forEach((sym, i) => {
+        if (i < WHITE_GY.length) {
+            const el = document.getElementById(`gc-${WHITE_GY[i][0]}-${WHITE_GY[i][1]}`);
+            if (el) el.textContent = sym;
+        }
+    });
+    (capB || []).forEach((sym, i) => {
+        if (i < BLACK_GY.length) {
+            const el = document.getElementById(`gc-${BLACK_GY[i][0]}-${BLACK_GY[i][1]}`);
+            if (el) el.textContent = sym;
+        }
+    });
+    // Dames de promotion (toujours visibles)
+    WHITE_QR.forEach(([c,r]) => {
+        const el = document.getElementById(`gc-${c}-${r}`);
+        if (el) el.textContent = '♕';
+    });
+    BLACK_QR.forEach(([c,r]) => {
+        const el = document.getElementById(`gc-${c}-${r}`);
+        if (el) el.textContent = '♛';
+    });
+}
+
+// ─── État ─────────────────────────────────────────────────────────────────
+let simSelected   = null;
+let simLegalMoves = [];
+let moveHistory   = [];
+let gameOver      = false;
+let waitingBot    = false;
+
+// ─── Mapping clic SVG → case ──────────────────────────────────────────────
+function clickToSquare(event, img) {
+    const rect  = img.getBoundingClientRect();
+    const margin = rect.width * 15 / 500;
+    const board  = rect.width - 2 * margin;
+    const sq     = board / 8;
+    const x = event.clientX - rect.left - margin;
+    const y = event.clientY - rect.top  - margin;
+    if (x < 0 || y < 0 || x > board || y > board) return null;
+    return String.fromCharCode(97 + Math.floor(x / sq)) + (8 - Math.floor(y / sq));
+}
+
+// ─── Rafraîchissement ─────────────────────────────────────────────────────
+function refreshBoard(selected = null) {
+    const base = '/sim/board.svg' + (selected ? `?selected=${selected}&` : '?');
+    document.getElementById('sim-board').src = base + 't=' + Date.now();
+}
+
+// ─── Clic échiquier ───────────────────────────────────────────────────────
+function onBoardClick(event) {
+    if (gameOver || waitingBot) return;
+    const sq = clickToSquare(event, document.getElementById('sim-board'));
+    if (!sq) return;
+
+    if (simSelected === null) {
+        if (simLegalMoves.some(m => m.startsWith(sq))) {
+            simSelected = sq;
+            document.getElementById('selected-display').textContent = sq.toUpperCase();
+            refreshBoard(sq);
+        }
+    } else {
+        if (sq === simSelected) {
+            simSelected = null;
+            document.getElementById('selected-display').textContent = '—';
+            refreshBoard(); return;
+        }
+        let uci = simSelected + sq;
+        if (simLegalMoves.some(m => m.startsWith(uci) && m.length === 5)) uci += 'q';
+        if (simLegalMoves.includes(uci)) {
+            sendMove(uci);
+        } else {
+            simSelected = simLegalMoves.some(m => m.startsWith(sq)) ? sq : null;
+            document.getElementById('selected-display').textContent =
+                simSelected ? simSelected.toUpperCase() : '—';
+            refreshBoard(simSelected);
+        }
+    }
+}
+
+// ─── Coup humain ──────────────────────────────────────────────────────────
+function sendMove(uci) {
+    fetch('/api/sim/move', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({uci})
+    }).then(r => r.json()).then(d => {
+        simSelected = null;
+        document.getElementById('selected-display').textContent = '—';
+        if (d.status === 'ok') {
+            moveHistory.push({uci, color: 'w'});
+            refreshBoard();
+            fetchStatus(true);
+        }
+    });
+}
+
+// ─── Statut ───────────────────────────────────────────────────────────────
+function fetchStatus(triggerBot = false) {
+    fetch('/api/sim/status').then(r => r.json()).then(d => {
+        simLegalMoves = d.legal_moves || [];
+        gameOver = d.game_over;
+        document.getElementById('move-count').textContent = d.move_count || 0;
+        updateTurnBox(d.turn, d.game_over, d.outcome);
+        renderHistory();
+        if (d.captured) renderGraveyard(d.captured.w, d.captured.b);
+        if (triggerBot && !d.game_over && d.turn === 'black') triggerBotMove();
+    });
+}
+
+// ─── Bot ──────────────────────────────────────────────────────────────────
+function triggerBotMove() {
+    waitingBot = true;
+    document.getElementById('thinking').style.display = 'block';
+    fetch('/api/sim/bot_move', {method: 'POST'}).then(r => r.json()).then(d => {
+        waitingBot = false;
+        document.getElementById('thinking').style.display = 'none';
+        if (d.status === 'ok') {
+            moveHistory.push({uci: d.uci, color: 'b'});
+            refreshBoard();
+            fetchStatus(false);
+        }
+    }).catch(() => {
+        waitingBot = false;
+        document.getElementById('thinking').style.display = 'none';
+    });
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────
+function updateTurnBox(turn, over, outcome) {
+    const box = document.getElementById('turn-box');
+    if (over) {
+        box.className = 'turn-box turn-over';
+        const r = {'1-0':'Victoire Blancs 🏆','0-1':'Victoire Noirs 🏆','1/2-1/2':'Nulle ½-½'};
+        box.textContent = r[outcome] || 'Partie terminée';
+    } else {
+        box.className = turn === 'white' ? 'turn-box turn-white' : 'turn-box turn-black';
+        box.textContent = turn === 'white' ? '⬜ Tour des BLANCS (vous)' : '⬛ Tour des NOIRS (Stockfish)';
+    }
+}
+
+function renderHistory() {
+    const el = document.getElementById('move-history');
+    if (!moveHistory.length) { el.innerHTML = '—'; return; }
+    let html = '';
+    for (let i = 0; i < moveHistory.length; i += 2) {
+        html += `<span style="color:#444">${Math.floor(i/2)+1}.</span> `;
+        html += `<span class="w">${moveHistory[i]?.uci||''}</span> `;
+        if (moveHistory[i+1]) html += `<span class="b">${moveHistory[i+1].uci}</span> `;
+    }
+    el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
+}
+
+// ─── Contrôles ────────────────────────────────────────────────────────────
+function simReset() {
+    fetch('/api/sim/reset', {method:'POST'}).then(() => {
+        moveHistory = []; simSelected = null; gameOver = false; waitingBot = false;
+        document.getElementById('thinking').style.display = 'none';
+        document.getElementById('selected-display').textContent = '—';
+        refreshBoard(); fetchStatus(false);
+    });
+}
+
+function simUndo() {
+    fetch('/api/sim/undo', {method:'POST'}).then(() => {
+        if (moveHistory.length >= 2) moveHistory.splice(-2, 2);
+        else if (moveHistory.length === 1) moveHistory.pop();
+        simSelected = null; waitingBot = false;
+        document.getElementById('thinking').style.display = 'none';
+        refreshBoard(); fetchStatus(false);
+    });
+}
+
+function simExportUsb() {
+    fetch('/api/sim/export_usb', {method:'POST'}).then(r => r.json())
+    .then(d => alert(d.status === 'ok' ? '✅ Exporté : ' + d.msg : '❌ ' + d.msg));
+}
+
+let eloTimer = null;
+function onSimEloChange(val) {
+    document.getElementById('sim-elo-display').textContent = val;
+    clearTimeout(eloTimer);
+    eloTimer = setTimeout(() => fetch('/api/sim/set_elo', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({elo: parseInt(val)})
+    }), 600);
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+fetchStatus(false);
+</script>
+</body>
+</html>

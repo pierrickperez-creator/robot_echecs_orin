@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Robot Échecs</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white;
+               margin: 0; overflow: hidden; }
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; height: 100vh; }
+
+        /* ── Panneau gauche (caméra / plateau) ── */
+        /* La caméra est dans le flux normal (toujours rendue = stream toujours actif).
+           Le plateau s'y superpose en position absolute avec opacity. */
+        .video-section { background: #000; position: relative; border-right: 3px solid #333;
+                         overflow: hidden; display: flex; align-items: center; justify-content: center; }
+
+        /* Vue caméra : occupe tout le panneau, stream toujours actif */
+        #view-camera { position: absolute; inset: 0; display: flex;
+                       align-items: center; justify-content: center; z-index: 1; }
+        #camera-feed { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .live-badge { position: absolute; bottom: 10px; left: 10px;
+                      color: #27ae60; font-size: 13px; z-index: 5; }
+
+        /* Vue plateau : superposée, toggle par opacity (pas display:none) */
+        #view-board {
+            position: absolute; inset: 0; display: flex; flex-direction: column;
+            background: #0a0a0a; z-index: 2;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s;
+        }
+        #view-board.active { opacity: 1; pointer-events: auto; }
+        .left-board-header {
+            flex-shrink: 0; padding: 6px 12px; font-size: 12px; color: #777;
+            text-align: center; border-bottom: 1px solid #1e1e1e; background: #111;
+        }
+        .left-board-header strong { color: #ccc; }
+        .left-board-wrapper {
+            flex: 1; min-height: 0; display: flex; align-items: center;
+            justify-content: center; padding: 6px;
+        }
+        .full-board-left {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(10, 1fr);
+            aspect-ratio: 1 / 1;
+            height: 100%; width: auto; max-width: 100%;
+            background: #0d0d0d; border: 1px solid #333;
+            border-radius: 6px; overflow: hidden;
+        }
+        .chess-area-left { grid-column: 2/10; grid-row: 2/10; }
+        .chess-area-left img { width: 100%; height: 100%; display: block; cursor: crosshair; }
+        .left-history {
+            flex-shrink: 0; padding: 4px 10px; font-family: 'Courier New', monospace;
+            font-size: 11px; background: #0d0d0d; color: #7f8c8d;
+            height: 36px; overflow: hidden; border-top: 1px solid #1e1e1e;
+            white-space: nowrap; text-overflow: ellipsis;
+        }
+        .left-history .w { color: #ecf0f1; }
+        .left-history .b { color: #95a5a6; }
+        .left-history .n { color: #444; }
+
+        /* Bouton bascule (flottant en haut à droite) */
+        #view-toggle {
+            position: absolute; top: 8px; right: 8px; z-index: 200;
+            background: rgba(15,15,15,0.88); border: 2px solid #444;
+            border-radius: 20px; padding: 6px 14px; color: #bbb;
+            font-size: 13px; font-weight: bold; cursor: pointer;
+            backdrop-filter: blur(6px); transition: 0.15s; white-space: nowrap;
+        }
+        #view-toggle:hover { border-color: #888; color: white; background: rgba(30,30,30,0.95); }
+        #view-toggle:active { transform: scale(0.95); }
+
+        /* ── Panneau droit ── */
+        .control-panel { display: flex; flex-direction: column; background: #1a1a1a; overflow: hidden; }
+
+        /* ── Header nav (avec Tux en haut à gauche) ── */
+        .nav-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+                   background: #161616; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
+        .nav-links { display: flex; gap: 7px; margin-left: auto; }
+        .nav-btn { padding: 6px 12px; background: #2c3e50; border: 1px solid #3d5166;
+                   border-radius: 7px; color: #aaa; font-size: 12px; cursor: pointer;
+                   text-decoration: none; transition: 0.15s; }
+        .nav-btn:hover { color: white; background: #3d5166; }
+
+        /* Tux dans la nav */
+        #btn-tux { width: 38px; height: 38px; background: #2c3e50; border: 2px solid #444;
+                   border-radius: 50%; padding: 0; display: flex; align-items: center;
+                   justify-content: center; cursor: pointer; flex-shrink: 0; transition: 0.2s; }
+        #btn-tux:hover { background: #3d5166; }
+        #btn-tux:active { transform: scale(0.9); }
+        #btn-tux svg { width: 24px; height: 24px; }
+
+        /* ── Contenu sans scroll ── */
+        .panel-body { flex: 1; overflow: hidden; padding: 10px 12px;
+                      display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+
+        /* Status */
+        .status-bar { padding: 9px 14px; background: #2c3e50; border-radius: 8px;
+                      text-align: center; font-weight: bold; font-size: 0.95em;
+                      border: 1px solid #34495e; flex-shrink: 0; }
+
+        /* Horloges */
+        .clock-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .clock-header label { display: flex; align-items: center; gap: 5px;
+                               cursor: pointer; font-size: 12px; color: #888; }
+        .clock-time-set { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+        .clock-time-set input[type=number] {
+            width: 52px; background: #111; border: 1px solid #444; border-radius: 6px;
+            color: white; padding: 4px 6px; font-size: 13px; text-align: center; }
+        .clock-time-set input:focus { outline: none; border-color: #3498db; }
+        .clocks { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+        .clock-box { padding: 5px; border-radius: 7px; text-align: center;
+                     border: 2px solid #333; transition: border-color 0.3s; }
+        .clock-box.active { border-color: #f1c40f; background: #1e1e10; }
+        .clock-label { font-size: 10px; color: #888; margin-bottom: 2px; }
+        .clock-time  { font-size: 1.4em; font-weight: bold; font-variant-numeric: tabular-nums; }
+        .clock-white .clock-time { color: #ecf0f1; }
+        .clock-black .clock-time { color: #95a5a6; }
+
+        /* ── Wrapper plateau (prend l'espace restant) ── */
+        .board-wrapper { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+
+        /* ── Grille 10×10 ── */
+        .full-board {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(10, 1fr);
+            aspect-ratio: 1 / 1;
+            height: 100%;
+            width: auto;
+            max-width: 100%;
+            background: #0d0d0d;
+            border: 1px solid #333;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .chess-area { grid-column: 2/10; grid-row: 2/10; }
+        .chess-area img { width: 100%; height: 100%; display: block; cursor: crosshair; }
+        .gc { display: flex; align-items: center; justify-content: center;
+              font-size: 13px; border: 1px solid #1a1a1a; line-height: 1; }
+        .gc.bz  { background: #0f1f0f; color: #6baa6b; }
+        .gc.wz  { background: #1f1f0a; color: #aaa870; }
+        .gc.qb  { background: #1a0d2a; color: #cc88ff; font-size: clamp(14px, 3.5vmin, 32px); }
+        .gc.qw  { background: #1a1a2a; color: #88aaff; font-size: clamp(14px, 3.5vmin, 32px); }
+        .gc.used { opacity: 0.25; }
+
+        /* ELO */
+        .elo-row { display: flex; align-items: center; gap: 8px;
+                   background: #222; border-radius: 7px; padding: 6px 10px; }
+        .elo-row label { font-size: 11px; color: #888; white-space: nowrap; }
+        .elo-row input[type=range] { flex: 1; accent-color: #e74c3c; }
+        #elo-display { font-weight: bold; color: #e74c3c; min-width: 36px;
+                       text-align: right; font-size: 12px; }
+
+        /* Boutons */
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+        button { padding: 9px; border: none; border-radius: 7px; font-weight: bold;
+                 font-size: 12px; cursor: pointer; color: white; transition: 0.12s; }
+        button:active { transform: scale(0.95); }
+        .btn-green { background: #27ae60; }
+        .btn-blue  { background: #2980b9; }
+        .btn-orange{ background: #f39c12; }
+        .btn-teal  { background: #16a085; }
+        .btn-gray  { background: #555; }
+        .btn-purple{ background: #8e44ad; }
+        .btn-stop  { background: #c0392b; grid-column: span 2; font-size: 16px; }
+
+        /* Bouton JOUER ROBOT — état d'attente */
+        #btn-play-robot { grid-column: span 2; font-size: 15px; transition: 0.2s; }
+        #btn-play-robot.ready {
+            background: #27ae60;
+            animation: pulse-green 1.2s infinite;
+            box-shadow: 0 0 18px #27ae60aa;
+        }
+        #btn-play-robot.waiting { background: #555; cursor: not-allowed; }
+        @keyframes pulse-green {
+            0%,100% { box-shadow: 0 0 10px #27ae6088; }
+            50%      { box-shadow: 0 0 28px #27ae60ff; }
+        }
+
+        /* Bandeau sécurité */
+        #safety-banner {
+            display: none; background: #7d3c00; border: 2px solid #e67e22;
+            border-radius: 8px; padding: 10px 14px; text-align: center;
+            font-weight: bold; font-size: 13px; color: #f39c12;
+            animation: blink-border 1s infinite;
+        }
+        #safety-banner.show { display: block; }
+        @keyframes blink-border {
+            0%,100% { border-color: #e67e22; }
+            50%      { border-color: #f39c12; }
+        }
+
+        /* Onglets historique / log */
+        .tabs { display: flex; border-bottom: 1px solid #333; }
+        .tab-btn { flex: 1; padding: 7px; background: none; border: none; color: #666;
+                   font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent;
+                   font-weight: bold; border-radius: 0; }
+        .tab-btn.active { color: #3498db; border-bottom-color: #3498db; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .history-box, .log-box {
+            background: #0d0d0d; border-radius: 0 0 6px 6px;
+            padding: 6px 9px; font-family: 'Courier New', monospace; font-size: 11px;
+            color: #7f8c8d; height: 88px; overflow-y: auto; line-height: 1.6;
+        }
+        .history-box .w { color: #ecf0f1; }
+        .history-box .b { color: #95a5a6; }
+        .history-box .n { color: #555; }
+        .log-box .tx  { color: #3498db; }
+        .log-box .sim { color: #f39c12; }
+        .log-box .err { color: #e74c3c; }
+        .log-box .ok  { color: #27ae60; }
+
+        /* ── Modale choix couleur ── */
+        #color-modal {
+            display: none; position: fixed; inset: 0; z-index: 5000;
+            background: rgba(0,0,0,0.82);
+            align-items: center; justify-content: center;
+        }
+        #color-modal.show { display: flex; }
+        .color-modal-box {
+            background: #1e1e1e; border: 3px solid #f1c40f; border-radius: 18px;
+            padding: 32px 40px; text-align: center; width: 340px;
+        }
+        .color-modal-box h2 { margin: 0 0 8px; font-size: 1.3em; color: #f1c40f; }
+        .color-modal-box p  { margin: 0 0 24px; color: #aaa; font-size: 13px; }
+        .color-choices { display: flex; gap: 16px; justify-content: center; }
+        .color-btn {
+            flex: 1; padding: 22px 10px; border: 3px solid transparent;
+            border-radius: 12px; cursor: pointer; font-size: 15px; font-weight: bold;
+            color: white; transition: 0.15s;
+        }
+        .color-btn:active { transform: scale(0.95); }
+        .color-btn.white-btn { background: #2c3e50; border-color: #ecf0f1; color: #ecf0f1; }
+        .color-btn.black-btn { background: #1a1a2e; border-color: #95a5a6; color: #bdc3c7; }
+        .color-btn:hover { filter: brightness(1.2); }
+
+        /* ── Modale pièce ── */
+        #piece-selector { display: none; position: fixed; top: 50%; left: 50%;
+                          transform: translate(-50%,-50%); background: #2c3e50; padding: 18px;
+                          border-radius: 14px; z-index: 1000; border: 3px solid #f39c12;
+                          box-shadow: 0 0 40px rgba(0,0,0,0.8); }
+        .piece-grid { display: grid; grid-template-columns: repeat(6, 54px); gap: 8px; }
+        .piece-btn { background: #ecf0f1; color: #2c3e50; font-size: 28px; height: 54px;
+                     display: flex; align-items: center; justify-content: center;
+                     border-radius: 7px; cursor: pointer; border: none; }
+        .piece-btn:active { transform: scale(0.92); }
+
+        /* ── Célébration ── */
+        #celebration {
+            display: none; position: fixed; inset: 0; z-index: 9999;
+            background: rgba(0,0,0,0.88);
+            flex-direction: column; align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+        #celebration.show { display: flex; }
+        #celebration-emoji { font-size: 100px; animation: bounce 0.6s infinite alternate; }
+        #celebration-text  { font-size: 3.5em; font-weight: 900; text-align: center;
+                             margin-top: 20px; text-shadow: 0 0 40px currentColor; }
+        #celebration-sub   { font-size: 1.1em; color: #888; margin-top: 12px; }
+        #countdown-bar { width: 300px; height: 6px; background: #333; border-radius: 3px;
+                         margin-top: 30px; overflow: hidden; }
+        #countdown-fill { height: 100%; background: #f1c40f;
+                          transition: width 1s linear; border-radius: 3px; }
+        @keyframes bounce { from { transform: scale(1); } to { transform: scale(1.15); } }
+
+        /* Confettis */
+        #confetti-container { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 10000; }
+        .cp { position: absolute; top: -20px; border-radius: 2px;
+              animation: fall linear forwards; }
+        @keyframes fall {
+            0%   { transform: translateY(0)   rotate(0deg);   opacity: 1; }
+            100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Conteneur confettis (hors dashboard) -->
+<div id="confetti-container"></div>
+
+<!-- Overlay célébration -->
+<div id="celebration" onclick="hideCelebration()">
+    <div id="celebration-emoji">🏆</div>
+    <div id="celebration-text" style="color:#f1c40f">VICTOIRE!</div>
+    <div id="celebration-sub">Cliquez pour fermer</div>
+    <div id="countdown-bar"><div id="countdown-fill" style="width:100%"></div></div>
+</div>
+
+<div class="dashboard">
+    <!-- PANNEAU GAUCHE : Caméra / Plateau -->
+    <div class="video-section">
+
+        <!-- Vue caméra : toujours dans le DOM, jamais cachée -->
+        <div id="view-camera">
+            <img id="camera-feed" alt="Flux Vidéo">
+            <div class="live-badge">● LIVE</div>
+        </div>
+
+        <!-- Bouton bascule (au-dessus de tout) -->
+        <button id="view-toggle" onclick="toggleLeftView()">♟ PLATEAU</button>
+
+        <!-- Vue plateau : superposée, cachée par opacity par défaut -->
+        <div id="view-board">
+            <div class="left-board-header">
+                <strong id="left-status">♟ PARTIE EN COURS</strong>
+            </div>
+            <div class="left-board-wrapper">
+                <div class="full-board-left" id="full-board-left">
+                    <div class="chess-area-left">
+                        <img id="board-img-left" src="/board.svg" onclick="onBoardClick(event)">
+                    </div>
+                </div>
+            </div>
+            <div class="left-history" id="left-move-history">—</div>
+        </div>
+
+    </div>
+
+    <!-- PANNEAU CONTRÔLE -->
+    <div class="control-panel">
+
+        <!-- Barre de navigation avec Tux en haut à gauche -->
+        <div class="nav-bar">
+            <button id="btn-tux" onclick="quitKiosk()" title="Retour au bureau">
+                <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                    <ellipse cx="24" cy="30" rx="13" ry="14" fill="#222"/>
+                    <ellipse cx="24" cy="32" rx="8"  ry="10" fill="#eee"/>
+                    <ellipse cx="24" cy="14" rx="10" ry="10" fill="#222"/>
+                    <circle cx="20.5" cy="12" r="2.5" fill="white"/>
+                    <circle cx="27.5" cy="12" r="2.5" fill="white"/>
+                    <circle cx="21"   cy="12" r="1.2" fill="#333"/>
+                    <circle cx="28"   cy="12" r="1.2" fill="#333"/>
+                    <ellipse cx="24" cy="17" rx="3" ry="2" fill="#f90"/>
+                    <ellipse cx="17" cy="43" rx="5" ry="2.5" fill="#f90" transform="rotate(-15 17 43)"/>
+                    <ellipse cx="31" cy="43" rx="5" ry="2.5" fill="#f90" transform="rotate(15 31 43)"/>
+                    <ellipse cx="11" cy="30" rx="4" ry="9"   fill="#222" transform="rotate(-10 11 30)"/>
+                    <ellipse cx="37" cy="30" rx="4" ry="9"   fill="#222" transform="rotate(10 37 30)"/>
+                </svg>
+            </button>
+            <div class="nav-links">
+                <a class="nav-btn" href="/simulation">♟ Simulation</a>
+                <a class="nav-btn" href="/legendaires">★ Légendaires</a>
+                <a class="nav-btn" href="/controle_manuel">🎮 Manuel</a>
+            </div>
+        </div>
+
+        <div class="panel-body">
+
+            <div class="status-bar" id="status">SYSTÈME PRÊT</div>
+
+            <!-- Horloges -->
+            <div>
+                <div class="clock-header">
+                    <label>
+                        <input type="checkbox" id="clock-toggle" checked onchange="toggleClock(this.checked)">
+                        Horloge
+                    </label>
+                    <div class="clock-time-set">
+                        <input type="number" id="clock-minutes" value="10" min="1" max="90"
+                               title="Durée par joueur (minutes)">
+                        <span style="font-size:11px;color:#666">min</span>
+                        <button style="padding:4px 10px;font-size:11px;background:#2980b9;"
+                                onclick="applyClockTime()">SET</button>
+                    </div>
+                </div>
+                <div class="clocks" id="clocks-row" style="margin-top:6px">
+                    <div class="clock-box clock-white" id="clock-white">
+                        <div class="clock-label">⬜ BLANCS</div>
+                        <div class="clock-time" id="time-white">10:00</div>
+                    </div>
+                    <div class="clock-box clock-black" id="clock-black">
+                        <div class="clock-label">⬛ NOIRS</div>
+                        <div class="clock-time" id="time-black">10:00</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Grille 10×10 -->
+            <div class="board-wrapper">
+                <div class="full-board" id="full-board">
+                    <div class="chess-area">
+                        <img id="board-img" src="/board.svg" onclick="onBoardClick(event)">
+                    </div>
+                </div>
+            </div>
+
+            <!-- ELO -->
+            <div class="elo-row">
+                <label>ELO</label>
+                <input type="range" id="elo-slider" min="100" max="3200" step="100" value="500"
+                       oninput="onEloChange(this.value)">
+                <span id="elo-display">500</span>
+            </div>
+
+            <!-- Bandeau sécurité -->
+            <div id="safety-banner">⚠️ Retirez vos mains de la zone de jeu puis appuyez sur JOUER ROBOT</div>
+
+            <!-- Boutons -->
+            <div class="btn-grid">
+                <button id="btn-play-robot" class="waiting" onclick="playRobotMove()">🤖 JOUER ROBOT</button>
+                <button class="btn-blue"   onclick="goHome()">HOME MOTEURS</button>
+                <button class="btn-orange" id="edit-btn" onclick="toggleEditMode()">MODIFIER PIÈCE : OFF</button>
+                <button class="btn-blue"   onclick="undoLastMove()">ANNULER COUP</button>
+                <button class="btn-teal"   onclick="resetGame()">NOUVELLE PARTIE</button>
+                <button class="btn-purple" onclick="rangerPlateau()">🧹 RANGER PLATEAU</button>
+                <button class="btn-gray"   onclick="exportUsb()">EXPORT USB</button>
+                <button class="btn-stop"   onclick="emergencyStop()">⛔ STOP D'URGENCE</button>
+            </div>
+
+            <!-- Onglets Historique / GCode -->
+            <div style="background:#111;border-radius:6px;overflow:hidden;">
+                <div class="tabs">
+                    <button class="tab-btn active" onclick="showTab('history')">♟ Historique coups</button>
+                    <button class="tab-btn"        onclick="showTab('log')">⚙ GCode direct</button>
+                </div>
+                <div id="tab-history" class="tab-content active">
+                    <div class="history-box" id="move-history">—</div>
+                </div>
+                <div id="tab-log" class="tab-content">
+                    <div class="log-box" id="gcode-log">En attente...</div>
+                </div>
+            </div>
+
+        </div><!-- /panel-body -->
+    </div>
+</div>
+
+<!-- Modale choix de couleur -->
+<div id="color-modal">
+    <div class="color-modal-box">
+        <h2>♟ Nouvelle partie</h2>
+        <p>Quelle couleur voulez-vous jouer ?</p>
+        <div class="color-choices">
+            <button class="color-btn white-btn" onclick="startGameWithColor(true)">
+                ⬜<br>BLANCS<br><small style="font-weight:normal;color:#888">Vous jouez en premier</small>
+            </button>
+            <button class="color-btn black-btn" onclick="startGameWithColor(false)">
+                ⬛<br>NOIRS<br><small style="font-weight:normal;color:#888">Robot joue en premier</small>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Modale sélection pièce -->
+<div id="piece-selector">
+    <h2 style="margin-top:0;text-align:center;font-size:1em;">Case <span id="target-square">--</span></h2>
+    <div class="piece-grid">
+        <button class="piece-btn" onclick="setPiece('P')">♙</button>
+        <button class="piece-btn" onclick="setPiece('N')">♘</button>
+        <button class="piece-btn" onclick="setPiece('B')">♗</button>
+        <button class="piece-btn" onclick="setPiece('R')">♖</button>
+        <button class="piece-btn" onclick="setPiece('Q')">♕</button>
+        <button class="piece-btn" onclick="setPiece('K')">♔</button>
+        <button class="piece-btn" onclick="setPiece('p')">♟</button>
+        <button class="piece-btn" onclick="setPiece('n')">♞</button>
+        <button class="piece-btn" onclick="setPiece('b')">♝</button>
+        <button class="piece-btn" onclick="setPiece('r')">♜</button>
+        <button class="piece-btn" onclick="setPiece('q')">♛</button>
+        <button class="piece-btn" onclick="setPiece('k')">♚</button>
+    </div>
+    <button onclick="setPiece('')" style="width:100%;margin-top:10px;background:#7f8c8d;">VIDER LA CASE</button>
+    <button onclick="closeSelector()" style="width:100%;margin-top:7px;background:#c0392b;">ANNULER</button>
+</div>
+
+<script>
+// ─── Cimetière (cases I4=c9r4 blanc, I5=c9r5 noir) ────────────────────────
+const WHITE_GY = [];
+for (let r = 4; r >= 0; r--) WHITE_GY.push([0, r]);
+for (let c = 1; c <= 8; c++) WHITE_GY.push([c, 0]);
+for (let r = 0; r <= 4;  r++) WHITE_GY.push([9, r]);
+
+const BLACK_GY = [];
+for (let r = 5; r <= 9; r++) BLACK_GY.push([0, r]);
+for (let c = 1; c <= 8; c++) BLACK_GY.push([c, 9]);
+for (let r = 9; r >= 5;  r--) BLACK_GY.push([9, r]);
+
+const WHITE_QR = [[9, 4]];   // I4
+const BLACK_QR = [[9, 5]];   // I5
+
+function cellClass(c, r) {
+    if (WHITE_QR.some(([qc,qr]) => qc===c && qr===r)) return 'qw';
+    if (BLACK_QR.some(([qc,qr]) => qc===c && qr===r)) return 'qb';
+    if ((c===0 && r>=5) || r===9 || (c===9 && r>=5)) return 'bz';
+    return 'wz';
+}
+
+function buildBoardGrid(containerId, prefix) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    for (let c = 0; c < 10; c++) {
+        for (let r = 0; r < 10; r++) {
+            if (c >= 1 && c <= 8 && r >= 1 && r <= 8) continue;
+            const div = document.createElement('div');
+            div.id = `${prefix}-${c}-${r}`;
+            div.className = `gc ${cellClass(c, r)}`;
+            div.style.gridColumn = c + 1;
+            div.style.gridRow    = 10 - r;
+            container.appendChild(div);
+        }
+    }
+    [{c:0,r:9,t:'↖'},{c:9,r:9,t:'↗'},{c:0,r:0,t:'↙'},{c:9,r:0,t:'↘'}]
+        .forEach(({c,r,t}) => {
+            const el = document.getElementById(`${prefix}-${c}-${r}`);
+            if (el && !el.textContent) el.textContent = t;
+        });
+}
+buildBoardGrid('full-board',      'gc');
+buildBoardGrid('full-board-left', 'gcl');
+
+function renderGraveyardInto(prefix, capW, capB, usedWQ, usedBQ) {
+    [...WHITE_GY, ...BLACK_GY, ...WHITE_QR, ...BLACK_QR].forEach(([c,r]) => {
+        const el = document.getElementById(`${prefix}-${c}-${r}`);
+        if (el) { el.textContent = ''; el.classList.remove('used'); }
+    });
+    (capW||[]).forEach((sym,i) => {
+        if (i < WHITE_GY.length) {
+            const el = document.getElementById(`${prefix}-${WHITE_GY[i][0]}-${WHITE_GY[i][1]}`);
+            if (el) el.textContent = sym;
+        }
+    });
+    (capB||[]).forEach((sym,i) => {
+        if (i < BLACK_GY.length) {
+            const el = document.getElementById(`${prefix}-${BLACK_GY[i][0]}-${BLACK_GY[i][1]}`);
+            if (el) el.textContent = sym;
+        }
+    });
+    WHITE_QR.forEach(([c,r], i) => {
+        const el = document.getElementById(`${prefix}-${c}-${r}`);
+        if (el) { el.textContent = '♕'; el.classList.toggle('used', i < (usedWQ||0)); }
+    });
+    BLACK_QR.forEach(([c,r], i) => {
+        const el = document.getElementById(`${prefix}-${c}-${r}`);
+        if (el) { el.textContent = '♛'; el.classList.toggle('used', i < (usedBQ||0)); }
+    });
+}
+
+function renderGraveyard(capW, capB, usedWQ, usedBQ) {
+    renderGraveyardInto('gc',  capW, capB, usedWQ, usedBQ);
+    renderGraveyardInto('gcl', capW, capB, usedWQ, usedBQ);
+}
+
+// ─── Onglets ──────────────────────────────────────────────────────────────
+function showTab(name) {
+    document.querySelectorAll('.tab-btn').forEach((b,i) =>
+        b.classList.toggle('active', (i===0 && name==='history') || (i===1 && name==='log')));
+    document.getElementById('tab-history').classList.toggle('active', name==='history');
+    document.getElementById('tab-log').classList.toggle('active', name==='log');
+}
+
+// ─── Échiquier éditable ───────────────────────────────────────────────────
+let editMode = false, selectedSquare = '';
+function toggleEditMode() {
+    editMode = !editMode;
+    const btn = document.getElementById('edit-btn');
+    btn.textContent = editMode ? 'MODIFIER PIÈCE : ON' : 'MODIFIER PIÈCE : OFF';
+    btn.style.background = editMode ? '#e67e22' : '#f39c12';
+}
+function onBoardClick(event) {
+    if (!editMode) return;
+    const img = event.currentTarget || event.target;
+    const rect = img.getBoundingClientRect();
+    const col = String.fromCharCode(97 + Math.floor((event.clientX-rect.left)/(rect.width/8)));
+    const row = 8 - Math.floor((event.clientY-rect.top)/(rect.height/8));
+    selectedSquare = col + row;
+    document.getElementById('target-square').textContent = selectedSquare.toUpperCase();
+    document.getElementById('piece-selector').style.display = 'block';
+}
+function setPiece(sym) {
+    fetch('/api/edit_board', {method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({square:selectedSquare,piece:sym})})
+    .then(()=>{ closeSelector(); refreshBoard(); });
+}
+function closeSelector() { document.getElementById('piece-selector').style.display='none'; }
+
+// ─── Actions ─────────────────────────────────────────────────────────────
+let showingBoard = false;
+function toggleLeftView() {
+    showingBoard = !showingBoard;
+    document.getElementById('view-board').classList.toggle('active', showingBoard);
+    document.getElementById('view-toggle').textContent = showingBoard ? '📷 CAM' : '♟ PLATEAU';
+    if (showingBoard) refreshBoard();
+}
+
+function refreshBoard() {
+    const ts = Date.now();
+    document.getElementById('board-img').src      = '/board.svg?t=' + ts;
+    document.getElementById('board-img-left').src = '/board.svg?t=' + ts;
+}
+function playRobotMove() {
+    const btn = document.getElementById('btn-play-robot');
+    if (btn.classList.contains('waiting')) return;   // sécurité : ignoré si pas le bon tour
+    setSafetyMode(false);
+    btn.classList.replace('ready', 'waiting');
+    btn.textContent = '⏳ Robot réfléchit...';
+    document.getElementById('status').textContent = 'Stockfish réfléchit...';
+    fetch('/api/bot_move',{method:'POST'}).then(r=>r.json()).then(d=>{
+        document.getElementById('status').textContent = d.status==='ok'?'Robot joue : '+d.uci:'Erreur IA';
+        refreshBoard();
+    });
+}
+
+function setSafetyMode(on) {
+    const banner = document.getElementById('safety-banner');
+    const btn    = document.getElementById('btn-play-robot');
+    if (on) {
+        banner.classList.add('show');
+        btn.classList.replace('waiting','ready');
+        btn.textContent = '🤖 JOUER ROBOT';
+    } else {
+        banner.classList.remove('show');
+        btn.classList.replace('ready','waiting');
+        btn.textContent = '🤖 JOUER ROBOT';
+    }
+}
+function goHome()       { fetch('/cmd/home',{method:'POST'}); }
+function undoLastMove() { fetch('/api/undo',{method:'POST'}).then(()=>refreshBoard()); }
+function resetGame() {
+    document.getElementById('color-modal').classList.add('show');
+}
+
+function startGameWithColor(humanPlaysWhite) {
+    document.getElementById('color-modal').classList.remove('show');
+    fetch('/api/set_color', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({human_plays_white: humanPlaysWhite})
+    }).then(r => r.json()).then(d => {
+        wasGameOver = false;
+        refreshBoard();
+        if (d.robot_plays_first) {
+            // Robot joue blanc → afficher le bandeau sécurité immédiatement
+            setSafetyMode(true);
+        }
+    });
+}
+function exportUsb() {
+    fetch('/api/export_usb',{method:'POST'}).then(r=>r.json())
+    .then(d=>alert(d.status==='ok'?'✅ Exporté : '+d.msg:'❌ '+d.msg));
+}
+function emergencyStop() {
+    fetch('/emergency_stop',{method:'POST'})
+    .then(()=>document.getElementById('status').textContent='⛔ ARRÊT D\'URGENCE');
+}
+function rangerPlateau() {
+    if (!confirm('Le robot va replacer toutes les pièces à leur position de départ.\n\nRetirez vos mains du plateau et appuyez sur OK.')) return;
+    fetch('/api/reset_board_physical', {method:'POST'})
+    .then(()=>{
+        document.getElementById('status').textContent='🧹 Rangement en cours — ne touchez pas les pièces…';
+    });
+}
+function quitKiosk() {
+    fetch('/api/quit_kiosk', {method:'POST'});
+}
+
+// ─── ELO ─────────────────────────────────────────────────────────────────
+let eloTimer = null;
+function onEloChange(val) {
+    document.getElementById('elo-display').textContent = val;
+    clearTimeout(eloTimer);
+    eloTimer = setTimeout(()=>{
+        fetch('/api/set_elo',{method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({elo:parseInt(val)})});
+    }, 600);
+}
+
+// ─── Horloge ─────────────────────────────────────────────────────────────
+function toggleClock(enabled) {
+    fetch('/api/set_clock',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({enabled})});
+    document.getElementById('clocks-row').style.opacity = enabled ? '1' : '0.3';
+}
+function applyClockTime() {
+    const m = parseInt(document.getElementById('clock-minutes').value) || 10;
+    fetch('/api/set_clock_time',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({minutes:m})})
+    .then(()=>{ document.getElementById('time-white').textContent = fmtTime(m*60);
+                document.getElementById('time-black').textContent  = fmtTime(m*60); });
+}
+function fmtTime(sec) {
+    const m=Math.floor(sec/60), s=Math.floor(sec%60);
+    return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+
+// ─── Célébration ─────────────────────────────────────────────────────────
+let celebTimer = null;
+
+function showCelebration(outcome) {
+    const configs = {
+        '1-0':     { text:'LES BLANCS ONT GAGNÉ !', emoji:'⬜🏆', color:'#f1c40f' },
+        '0-1':     { text:'LES NOIRS ONT GAGNÉ !',  emoji:'⬛🏆', color:'#95a5a6' },
+        '1/2-1/2': { text:'MATCH NUL !',             emoji:'🤝',   color:'#3498db' },
+        'pat':     { text:'PAT !',                   emoji:'🤝',   color:'#3498db' },
+    };
+    const cfg = configs[outcome] || { text:'PARTIE TERMINÉE', emoji:'🏁', color:'#e74c3c' };
+
+    document.getElementById('celebration-emoji').textContent = cfg.emoji;
+    document.getElementById('celebration-text').textContent  = cfg.text;
+    document.getElementById('celebration-text').style.color  = cfg.color;
+    document.getElementById('countdown-fill').style.width    = '100%';
+    document.getElementById('celebration').classList.add('show');
+
+    // Confettis
+    spawnConfetti();
+
+    // Barre de décompte 5s
+    let pct = 100;
+    const interval = setInterval(()=>{
+        pct -= 4;
+        document.getElementById('countdown-fill').style.width = Math.max(0,pct) + '%';
+    }, 200);
+
+    clearTimeout(celebTimer);
+    celebTimer = setTimeout(()=>{
+        clearInterval(interval);
+        hideCelebration();
+    }, 5000);
+}
+
+function hideCelebration() {
+    document.getElementById('celebration').classList.remove('show');
+    document.getElementById('confetti-container').innerHTML = '';
+    clearTimeout(celebTimer);
+}
+
+function spawnConfetti() {
+    const container = document.getElementById('confetti-container');
+    container.innerHTML = '';
+    const colors = ['#f1c40f','#e74c3c','#3498db','#2ecc71','#9b59b6','#e67e22','#1abc9c','#fff'];
+    for (let i = 0; i < 120; i++) {
+        const p = document.createElement('div');
+        p.className = 'cp';
+        const size = 6 + Math.random() * 10;
+        p.style.cssText = [
+            `left:${Math.random()*100}%`,
+            `width:${size}px`, `height:${size}px`,
+            `background:${colors[Math.floor(Math.random()*colors.length)]}`,
+            `border-radius:${Math.random()>0.5?'50%':'2px'}`,
+            `animation-delay:${(Math.random()*2).toFixed(2)}s`,
+            `animation-duration:${(2+Math.random()*3).toFixed(2)}s`,
+        ].join(';');
+        container.appendChild(p);
+    }
+}
+
+// ─── Historique des coups ─────────────────────────────────────────────────
+function renderMoveHistory(moves) {
+    const el = document.getElementById('move-history');
+    if (!moves || !moves.length) { el.innerHTML = '—'; return; }
+    let html = '';
+    for (let i = 0; i < moves.length; i += 2) {
+        html += `<span class="n">${Math.floor(i/2)+1}. </span>`;
+        html += `<span class="w">${moves[i]}</span> `;
+        if (moves[i+1]) html += `<span class="b">${moves[i+1]}</span> `;
+    }
+    el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
+    // Miroir dans le panneau gauche (derniers coups visibles)
+    const left = document.getElementById('left-move-history');
+    if (left) left.innerHTML = html;
+}
+
+// ─── GCode Log ────────────────────────────────────────────────────────────
+let lastLogLen = 0;
+function pollGcodeLog() {
+    fetch('/api/gcode_log').then(r=>r.json()).then(d=>{
+        const logs = d.logs||[];
+        if (logs.length===lastLogLen) return;
+        lastLogLen = logs.length;
+        const box = document.getElementById('gcode-log');
+        const atBottom = box.scrollHeight-box.scrollTop <= box.clientHeight+10;
+        box.innerHTML = logs.map(line=>{
+            let cls='tx';
+            if (line.includes('[SIM]'))  cls='sim';
+            else if (line.includes('ERREUR')||line.includes('!!!')) cls='err';
+            else if (line.includes('✅')||line.includes('OK')) cls='ok';
+            return `<div class="${cls}">${line.replace(/</g,'&lt;')}</div>`;
+        }).join('');
+        if (atBottom) box.scrollTop = box.scrollHeight;
+    }).catch(()=>{});
+}
+
+// ─── Polling statut ───────────────────────────────────────────────────────
+let lastMoveCount = -1;
+let wasGameOver   = false;
+
+function pollStatus() {
+    fetch('/api/status').then(r=>r.json()).then(d=>{
+        if (d.status_msg) {
+            document.getElementById('status').textContent = d.status_msg;
+            const ls = document.getElementById('left-status');
+            if (ls) ls.textContent = d.status_msg;
+        }
+
+        // Horloges
+        document.getElementById('time-white').textContent = fmtTime(d.time_white||0);
+        document.getElementById('time-black').textContent = fmtTime(d.time_black||0);
+        document.getElementById('clock-white').classList.toggle('active', d.turn==='white');
+        document.getElementById('clock-black').classList.toggle('active', d.turn==='black');
+        if (d.clock_enabled!==undefined) {
+            const cb=document.getElementById('clock-toggle');
+            if (cb.checked!==d.clock_enabled) cb.checked=d.clock_enabled;
+            document.getElementById('clocks-row').style.opacity=d.clock_enabled?'1':'0.3';
+        }
+        if (d.clock_minutes) document.getElementById('clock-minutes').value=d.clock_minutes;
+
+        // Cimetière
+        if (d.captured) renderGraveyard(d.captured.w,d.captured.b,d.used_white_queens,d.used_black_queens);
+
+        // Plateau
+        if (d.move_count!==lastMoveCount) {
+            lastMoveCount = d.move_count;
+            refreshBoard();
+        }
+
+        // Historique
+        if (d.moves) renderMoveHistory(d.moves);
+
+        // Bouton JOUER ROBOT — actif seulement quand c'est le tour du robot
+        const isRobotTurn = !d.game_over && d.robot_turn;
+        const btn = document.getElementById('btn-play-robot');
+        if (isRobotTurn && btn.classList.contains('waiting')) {
+            setSafetyMode(true);   // c'est au robot → afficher le bandeau + activer le bouton
+        } else if (!isRobotTurn && btn.classList.contains('ready')) {
+            setSafetyMode(false);  // plus au robot → désactiver
+        }
+
+        // Bouton physique pressé → déclencher le coup robot
+        if (d.robot_move_requested && isRobotTurn) {
+            playRobotMove();
+        }
+
+        // Célébration fin de partie
+        if (d.game_over && !wasGameOver && d.outcome) {
+            wasGameOver = true;
+            showCelebration(d.outcome);
+        } else if (!d.game_over) {
+            wasGameOver = false;
+        }
+    }).catch(()=>{});
+}
+
+setInterval(pollStatus,  2000);
+setInterval(pollGcodeLog, 1500);
+pollStatus();
+pollGcodeLog();
+
+// Polling caméra — plus compatible qu'un stream MJPEG dans Epiphany
+let camActive = true;
+function pollCamera() {
+    if (!camActive) return;
+    const img = document.getElementById('camera-feed');
+    const tmp = new Image();
+    tmp.onload = () => { img.src = tmp.src; pollCamera(); };
+    tmp.onerror = () => { setTimeout(pollCamera, 500); };
+    tmp.src = '/snapshot?t=' + Date.now();
+}
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(pollCamera, 300);
+});
+</script>
+</body>
+</html>
