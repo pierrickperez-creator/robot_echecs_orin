@@ -266,62 +266,61 @@ class CameraStream:
         _, buf = cv2.imencode('.jpg', img)
         return buf.tobytes()
 
-    def _update(self):
-        """Boucle principale de capture vidéo."""
-        cap = None
-        cam_label = None
-
-        # --- Tentative 1 : CSI GStreamer (Jetson) ---
+    def _open_any(self):
+        """Essaie CSI puis les deux index USB. Retourne (cap, label) ou (None, None)."""
         if config.USE_GSTREAMER:
-            cap, cam_label = self._try_gstreamer_csi()
+            cap, label = self._try_gstreamer_csi()
+            if cap is not None:
+                return cap, label
+        for cam_id in (config.CAM_ID_MAIN, config.CAM_ID_SECOND):
+            cap, label = self._try_v4l2(cam_id)
+            if cap is not None:
+                return cap, label
+        return None, None
 
-        # --- Tentative 2 : USB cam_id principal ---
-        if cap is None:
-            print("⚠️ GStreamer désactivé ou échoué, tentative USB (id=0)...")
-            cap, cam_label = self._try_v4l2(config.CAM_ID_MAIN)
-
-        # --- Tentative 3 : USB cam_id secondaire ---
-        if cap is None:
-            print(f"⚠️ USB id=0 échoué, tentative USB (id={config.CAM_ID_SECOND})...")
-            cap, cam_label = self._try_v4l2(config.CAM_ID_SECOND)
-
-        # --- Aucune caméra trouvée ---
-        if cap is None:
-            print("❌ Aucune caméra disponible. Mode dégradé activé.")
-            error_jpg = self._create_error_frame("Aucun peripherique detecte")
-            with self._lock:
-                self.frame_jpg = error_jpg
-                self.cam_ok = False
-                self.cam_type = "Erreur"
-            return
-
-        with self._lock:
-            self.cam_ok = True
-            self.cam_type = cam_label
-
-        consecutive_failures = 0
+    def _update(self):
+        """Boucle principale de capture vidéo, avec reconnexion automatique."""
         while self.running:
-            ret, img = cap.read()
-            if ret and img is not None:
-                consecutive_failures = 0
-                # Encodage JPEG
-                _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                with self._lock:
-                    self.frame_jpg = buf.tobytes()
-                    self.frame_raw = img.copy()
-            else:
-                consecutive_failures += 1
-                time.sleep(0.05)
-                if consecutive_failures >= 20:
-                    # Perte de signal prolongée → frame d'erreur
-                    error_jpg = self._create_error_frame("Signal perdu")
-                    with self._lock:
-                        self.frame_jpg = error_jpg
-                        self.cam_ok = False
-                    log_gcode("⚠️ Caméra : perte de signal prolongée.")
-                    consecutive_failures = 0
+            cap, cam_label = self._open_any()
 
-        cap.release()
+            # --- Aucune caméra exploitable : on réessaie plus tard ---
+            if cap is None:
+                with self._lock:
+                    if self.cam_ok or self.frame_jpg is None:
+                        print("❌ Aucune caméra ne renvoie d'image. Nouvel essai toutes les 5 s...")
+                    self.frame_jpg = self._create_error_frame("Aucune image recue - nouvel essai...")
+                    self.cam_ok = False
+                    self.cam_type = "Erreur"
+                time.sleep(5)
+                continue
+
+            with self._lock:
+                self.cam_ok = True
+                self.cam_type = cam_label
+            log_gcode(f"📷 Caméra connectée : {cam_label}")
+
+            consecutive_failures = 0
+            while self.running:
+                ret, img = cap.read()
+                if ret and img is not None:
+                    consecutive_failures = 0
+                    # Encodage JPEG
+                    _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    with self._lock:
+                        self.frame_jpg = buf.tobytes()
+                        self.frame_raw = img.copy()
+                else:
+                    consecutive_failures += 1
+                    time.sleep(0.05)
+                    if consecutive_failures >= 20:
+                        # Perte de signal prolongée → frame d'erreur puis reconnexion
+                        with self._lock:
+                            self.frame_jpg = self._create_error_frame("Signal perdu - reconnexion...")
+                            self.cam_ok = False
+                        log_gcode("⚠️ Caméra : perte de signal prolongée, reconnexion.")
+                        break
+
+            cap.release()
 
     def get_jpg(self):
         with self._lock:
