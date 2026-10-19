@@ -369,13 +369,54 @@ def grid_to_xy(c, r):
     a1 = (1, 1). Avec la calibration, transformation affine définie par a1, h1, a8
     (corrige décalage, échelle et léger biais du plateau) ; sinon valeurs théoriques.
     """
-    if all(k in pick_calib for k in ('a1', 'h1', 'a8')):
-        a1, h1, a8 = pick_calib['a1'], pick_calib['h1'], pick_calib['a8']
-        ux, uy = (h1[0] - a1[0]) / 7.0, (h1[1] - a1[1]) / 7.0   # une colonne
-        vx, vy = (a8[0] - a1[0]) / 7.0, (a8[1] - a1[1]) / 7.0   # une rangée
-        return (a1[0] + (c - 1) * ux + (r - 1) * vx,
-                a1[1] + (c - 1) * uy + (r - 1) * vy)
-    return config.grid_xy(c, r)
+    fit = _affine_fit()
+    if fit is None:
+        return config.grid_xy(c, r)
+    (ax, bx, cx), (ay, by, cy) = fit
+    x, y = ax * c + bx * r + cx, ay * c + by * r + cy
+    # Correction locale : chaque point mesuré corrige son voisinage (pondération 1/d²),
+    # le modèle passe ainsi exactement par toutes les cases centrées à la main.
+    num_x = num_y = den = 0.0
+    for (pc, pr), (px, py) in _measured_points().items():
+        d2 = (c - pc) ** 2 + (r - pr) ** 2
+        rx = px - (ax * pc + bx * pr + cx)
+        ry = py - (ay * pc + by * pr + cy)
+        if d2 < 1e-9:
+            return px, py
+        w = 1.0 / d2
+        num_x += w * rx
+        num_y += w * ry
+        den += w
+    return x + num_x / den, y + num_y / den
+
+
+def _measured_points():
+    """Cases où l'aimant a été centré à la main : {cellule (c, r): (x, y)}."""
+    pts = {}
+    for sq in ('a1', 'h1', 'a8'):
+        if sq in pick_calib:
+            pts[sq] = pick_calib[sq]
+    pts.update(pick_calib.get('points', {}))
+    return {(ord(sq[0]) - 96, int(sq[1])): xy for sq, xy in pts.items()}
+
+
+def _affine_fit():
+    """
+    Transformation (colonne, rangée) → (x, y) ajustée sur tous les points mesurés
+    (moindres carrés : exacte avec 3 points, moyenne les erreurs de centrage au-delà).
+    """
+    pts = _measured_points()
+    if len(pts) < 3:
+        return None
+    import numpy as np
+    cells = np.array([[c, r, 1.0] for (c, r) in pts])
+    xs = np.array([xy[0] for xy in pts.values()])
+    ys = np.array([xy[1] for xy in pts.values()])
+    if np.linalg.matrix_rank(cells) < 3:
+        return None
+    fx = np.linalg.lstsq(cells, xs, rcond=None)[0]
+    fy = np.linalg.lstsq(cells, ys, rcond=None)[0]
+    return tuple(fx), tuple(fy)
 
 
 def calculate_xy(square_name):
@@ -1769,6 +1810,14 @@ def api_pick_save():
     if what in ('a1', 'h1', 'a8'):
         pick_calib[what] = [round(pos['x'], 2), round(pos['y'], 2)]
         msg = f"{what} = X{pos['x']:.1f} Y{pos['y']:.1f}"
+    elif what == 'point':
+        sq = (request.json.get('square') or '').lower()
+        if len(sq) != 2 or sq[0] not in 'abcdefgh' or sq[1] not in '12345678':
+            return jsonify({"status": "error", "msg": f"Case inconnue : {sq}"}), 400
+        before = calculate_xy(sq)
+        pick_calib.setdefault('points', {})[sq] = [round(pos['x'], 2), round(pos['y'], 2)]
+        msg = (f"{sq} centré à X{pos['x']:.1f} Y{pos['y']:.1f} "
+               f"(écart corrigé X{pos['x'] - before[0]:+.1f} Y{pos['y'] - before[1]:+.1f})")
     elif what == 'surface':
         pick_calib['z_surface'] = round(pos['z'], 2)
         msg = f"Surface du plateau = Z{pos['z']:.1f}"

@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-19 13:52:20",
+  "date": "2026-10-19 18:24:56",
   "a1": [
     24.4,
     27.0
@@ -12,5 +12,19 @@
     25.2,
     184.2
   ],
-  "note": "Hauteurs effac\u00e9es : nouvelle r\u00e9f\u00e9rence Z (capteur sur la pi\u00e8ce e2). Refaire 'Hauteur de prise ici' au-dessus du roi e1."
+  "note": "Homing G28 sur pion de r\u00e9f\u00e9rence au centre. Prise r\u00e9gl\u00e9e sur le roi e1 (Z2.0), e1 centr\u00e9 \u00e0 la main.",
+  "pick_z": {
+    "p": 2.0,
+    "n": 2.0,
+    "b": 2.0,
+    "r": 2.0,
+    "q": 2.0,
+    "k": 2.0
+  },
+  "points": {
+    "e1": [
+      112.86,
+      28.77
+    ]
+  }
 }
