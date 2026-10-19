@@ -124,17 +124,12 @@ CAM_ID_SECOND  = 1                  # Index secondaire (/dev/video1)
 # --- DÉMARRAGE ---
 HOME_ON_STARTUP = False   # Pas de homing automatique : il se lance depuis l'écran (bouton DÉMARRER)
 
-# --- HOMING Z SUR UNE PIÈCE (remplace le G28 Z du firmware, qui descend toujours au même point) ---
-# Le capteur de plateau vient se poser sur la vis de la pièce de Z_REF_SQUARE (position de départ).
-# L'aimant est SENSOR_OFFSET_MM en avant du capteur (côté blancs) : capteur sur e2 → aimant sur e1.
-Z_REF_SQUARE       = "e2"
-SENSOR_OFFSET_MM   = 25.0     # distance capteur → aimant, le long des colonnes (vers la rangée 1)
-Z_REF_VALUE        = 50.0     # valeur donnée à Z quand le capteur se déclenche sur la pièce de référence
-Z_PROBE_STEP_MM    = 1.0      # descente par pas, en interrogeant le capteur (M119) à chaque pas
-Z_PROBE_FINE_MM    = 0.1      # second passage, plus fin
-Z_PROBE_MAX_MM     = 180.0    # descente maximale avant abandon (≈ toute la course Z)
-Z_LIFT_BEFORE_XY   = 10.0     # remontée avant le homing X/Y si la hauteur de la tête est inconnue
-Z_ENDSTOP_NAME     = "z_min"  # nom du capteur dans la réponse M119
+# --- HOMING ---
+# G28 du firmware Dagoma : le capteur (détection de la vis à ~6 mm) descend toujours au
+# CENTRE du plateau. Un pion de référence y est posé pendant le homing, puis retiré.
+# (Le firmware interdit de descendre sous le point de homing : pas de homing logiciel possible.)
+VERIFY_SQUARE        = "e1"   # après le homing, l'aimant se place au-dessus de ce roi pour vérification
+Z_BEFORE_PICK_CALIB  = 20.0   # hauteur des trajets juste après le homing, tant que la prise n'est pas réglée
 STEPPER_IDLE_OFF_SEC = 5      # coupe les moteurs après 5 s d'arrêt (supprime le sifflement)
 
 _detected_path = shutil.which("stockfish")

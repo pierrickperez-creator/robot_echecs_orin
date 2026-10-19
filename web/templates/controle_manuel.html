@@ -220,18 +220,14 @@
             du centre de l'aimant : aucun autre décalage à régler.
         </div>
         <div style="font-size:11px;color:#ccc;margin:4px 0 2px">
-            0. Capteur : placez le CAPTEUR (pas l'aimant) juste au-dessus de la vis du pion e2
-            avec X / Y, sans le faire toucher, puis 📌. À faire une fois avant le premier HOME.
+            1. Hauteur : après 🏠 HOME (pion de référence au centre, retiré ensuite), « Survoler e1 »
+            place l'aimant au-dessus du roi. Aimant ON, descendez Z par petits pas jusqu'à ce que
+            le roi se soulève, puis 📌.
         </div>
         <div class="btn2">
-            <button class="btn-blue" onclick="homeXY()">Homing X/Y + capteur sur e2</button>
-            <button class="btn-teal" onclick="pickSave('sensor')">📌 Capteur centré sur e2</button>
+            <button class="btn-blue" onclick="pickGoto('e1')">Survoler e1</button>
+            <button class="btn-teal" onclick="pickSave('all')">📌 Hauteur de prise ici</button>
         </div>
-        <div style="font-size:11px;color:#ccc;margin:4px 0 2px">
-            1. Hauteur : après 🏠 HOME (le capteur se pose sur le pion e2), l'aimant est au-dessus du roi e1.
-            Aimant ON, descendez Z par petits pas jusqu'à ce que le roi se soulève, puis 📌.
-        </div>
-        <button class="btn-teal" style="width:100%" onclick="pickSave('all')">📌 Hauteur de prise ici (toutes les pièces)</button>
         <div style="font-size:11px;color:#ccc;margin:6px 0 2px">
             2. Centrage : posez une pièce bien au centre de a1, h1 et a8. « Survoler » amène l'aimant
             1 mm au-dessus de la vis ; centrez-le avec X / Y (regardez de face puis de côté), puis 📌.
@@ -281,7 +277,7 @@
 
         <!-- Actions -->
         <div class="btn2">
-            <button class="btn-blue" onclick="doHome()">🏠 HOME (capteur sur e2)</button>
+            <button class="btn-blue" onclick="doHome()">🏠 HOME (pion au centre)</button>
             <button class="btn-stop" onclick="doStop()">⛔ URGENCE</button>
         </div>
         <button class="btn-purple" style="width:100%;margin-top:6px" onclick="gotoVision()">📷 POSITION CAMÉRA</button>
@@ -493,13 +489,6 @@ function pickSave(what) {
     fetch('/api/pick/save', {method: 'POST', headers: {'Content-Type': 'application/json'},
                              body: JSON.stringify({what})})
     .then(r => r.json()).then(d => { pickMsg((d.status === 'ok' ? '✅ ' : '❌ ') + d.msg); pickRefresh(); });
-}
-function homeXY() {
-    pickMsg('⏳ Homing X/Y...');
-    fetch('/cmd/home_xy', {method: 'POST'}).then(r => r.json()).then(d => {
-        if (d.status === 'ok') updatePosition(d.x, d.y, d.z);
-        pickMsg((d.status === 'ok' ? '👀 ' : '❌ ') + d.msg);
-    });
 }
 function pickHover(square) {
     pickMsg('Survol de ' + square + '...');

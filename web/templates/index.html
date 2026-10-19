@@ -714,11 +714,14 @@ function updateStartup(d) {
     const text = document.getElementById('startup-text');
     const btns = document.getElementById('startup-buttons');
     if (st === 'attente') {
-        text.innerHTML = "Vérifiez que :<br>• l'imprimante est <b>allumée</b><br>• les pièces sont en <b>position de départ</b> (pion e2 et roi e1 en place)<br>• la tête est <b>au-dessus des pièces</b>";
+        text.innerHTML = "Vérifiez que :<br>• l'imprimante est <b>allumée</b><br>• les pièces sont en <b>position de départ</b><br>• le <b>pion de référence</b> est posé <b>au centre du plateau</b>, sous le capteur";
         btns.innerHTML = '<button class="btn-teal" onclick="startupHome()">▶ DÉMARRER</button>';
     } else if (st === 'homing') {
-        text.innerHTML = "⏳ Mise en position…<br>Le capteur va se poser sur le pion e2.<br><b>Ne touchez pas le plateau.</b>";
+        text.innerHTML = "⏳ Mise en position…<br>Le capteur descend sur le pion de référence au centre.<br><b>Ne touchez pas le plateau.</b>";
         btns.innerHTML = '';
+    } else if (st === 'retrait') {
+        text.innerHTML = "✅ Homing terminé.<br><b>Retirez le pion de référence</b> du centre du plateau, puis touchez OK.<br>L'aimant ira ensuite au-dessus du roi e1.";
+        btns.innerHTML = '<button class="btn-teal" onclick="startupRemoved()">✅ OK, pion retiré</button>';
     } else if (st === 'verif') {
         text.innerHTML = "L'aimant doit être <b>juste au-dessus du roi e1</b>, bien centré.<br>Si c'est bon, touchez CONTINUER.";
         btns.innerHTML = '<button class="btn-teal" onclick="startupConfirm()">✅ CONTINUER</button>' +
@@ -731,6 +734,7 @@ function updateStartup(d) {
     modal.classList.add('show');
 }
 function startupHome()    { startupShown = ''; fetch('/api/startup/home',    {method:'POST'}).then(pollStatus); }
+function startupRemoved()  { startupShown = ''; fetch('/api/startup/removed', {method:'POST'}).then(pollStatus); }
 function startupConfirm() { startupShown = ''; fetch('/api/startup/confirm', {method:'POST'}).then(pollStatus); }
 
 // Met le bouton et le bandeau dans l'état correspondant au serveur

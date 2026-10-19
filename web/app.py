@@ -227,141 +227,52 @@ def load_z_state():
         return None
 
 
-def z_endstop_triggered():
-    """Interroge le capteur de plateau (M119)."""
-    if config.SIMULATION_MODE or not ser:
-        return False
-    name = getattr(config, 'Z_ENDSTOP_NAME', 'z_min')
-    with serial_lock:
-        try:
-            ser.write(b"M119\n")
-            state = None
-            deadline = time.time() + 3
-            while time.time() < deadline:
-                line = ser.readline().decode(errors='ignore').strip()
-                if line.startswith(name):
-                    state = "TRIGGERED" in line.upper()
-                if line.startswith("ok") and state is not None:
-                    break
-            return bool(state)
-        except Exception as e:
-            log_gcode(f"Lecture capteur impossible : {e}")
-            return False
-
-
-def sensor_square_to_magnet_xy(square):
-    """Position de l'aimant pour que le CAPTEUR soit au centre de `square`."""
-    x, y = calculate_xy(square)
-    if 'sensor_offset' in pick_calib:   # décalage aimant → capteur mesuré sur la machine
-        dx, dy = pick_calib['sensor_offset']
-        return x - dx, y - dy
-    # Direction "vers la rangée 8" en coordonnées machine (d'après la calibration a1 → a8)
-    ax, ay = grid_to_xy(1, 1)
-    bx, by = grid_to_xy(1, 8)
-    n = max(((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5, 1e-6)
-    ux, uy = (bx - ax) / n, (by - ay) / n
-    # Le capteur est SENSOR_OFFSET_MM côté rangée 8 par rapport à l'aimant
-    return x - ux * config.SENSOR_OFFSET_MM, y - uy * config.SENSOR_OFFSET_MM
-
-
 def home_axes():
     """
-    Homing complet sans G28 Z (le firmware descendrait toujours au même point) :
-      1. Z : hauteur connue (mémorisée) sinon supposée ; petite remontée de sécurité
-      2. G28 X Y
-      3. le capteur au-dessus de la pièce de Z_REF_SQUARE, descente par pas jusqu'au
-         déclenchement (M119), second passage fin, puis G92 Z = Z_REF_VALUE
-    Retourne True si le capteur a été trouvé.
+    Homing du firmware (G28). Le capteur descend toujours au centre du plateau :
+    un pion de référence doit y être posé (le capteur détecte sa vis) ; l'aimant est
+    alors au-dessus de d3/e3, vides en position de départ.
+    Retourne True si Marlin a confirmé.
     """
-    global homed, status_msg, last_position
+    global homed, status_msg
     homed = False
     if config.SIMULATION_MODE:
-        last_position = {'x': 0.0, 'y': 0.0, 'z': config.Z_REF_VALUE + 2}
         homed = True
         return True
     if not ser:
         return False
-
-    # 1. Hauteur de départ
-    z0 = load_z_state()
-    if z0 is None:
-        z0 = 100.0
-        log_gcode("Hauteur de la tête inconnue : on suppose qu'elle est au-dessus des pièces.")
-    send_gcode_raw(f"G92 Z{z0:.2f}")
-    last_position['z'] = z0
-    send_gcode_raw("G91")
-    send_gcode_raw(f"G0 Z{config.Z_LIFT_BEFORE_XY:.1f} F{config.FEED_Z}")
-    send_gcode_raw("G90")
-    send_gcode_raw("M400")
-    last_position['z'] = z0 + config.Z_LIFT_BEFORE_XY
-
-    # 2. X / Y (fins de course sur les côtés, sans risque)
     t0 = time.time()
-    if not send_gcode_raw("G28 X Y"):
-        log_gcode("⚠️ Homing X/Y non confirmé")
-        return False
-    if time.time() - t0 > 60:
-        log_gcode("⚠️ Homing X/Y anormalement long : alimentation de l'imprimante allumée ?")
+    ok = send_gcode_raw("G28")
+    duree = time.time() - t0
+    if ok and duree > 75:
+        # Moteurs sans courant : Marlin envoie les pas jusqu'au bout de la course sans toucher de butée
+        log_gcode(f"⚠️ Homing anormalement long ({duree:.0f} s) : alimentation de l'imprimante allumée ?")
         status_msg = "⚠️ Les moteurs ne semblent pas alimentés : vérifiez l'interrupteur de l'imprimante."
         return False
+    if not ok:
+        log_gcode("⚠️ Homing non confirmé par Marlin")
+        return False
     pos = read_marlin_position()
-    pos['z'] = last_position['z'] if pos['z'] is None else pos['z']
-
-    # 3. Capteur au-dessus de la pièce de référence
-    ref = config.Z_REF_SQUARE
-    mx, my = sensor_square_to_magnet_xy(ref)
-    log_gcode(f"Homing Z : capteur au-dessus de {ref} (aimant X{mx:.1f} Y{my:.1f})")
-    z = last_position['z']
-    move_xyz(mx, my, z)
-    # Hauteur réelle inconnue : on se donne une coordonnée haute pour que la limite logicielle
-    # de Marlin (pas de Z négatif) n'arrête pas la descente avant le contact.
-    z = config.Z_PROBE_MAX_MM + 30
-    send_gcode_raw(f"G92 Z{z:.2f}")
-    last_position['z'] = z
-    if z_endstop_triggered():
-        log_gcode("⚠️ Capteur déjà enfoncé avant la descente : arrêt.")
-        status_msg = "⚠️ Capteur de plateau déjà enfoncé : remontez la tête à la main."
-        return False
-
-    def descend(step, max_mm):
-        nonlocal z
-        travelled = 0.0
-        while travelled < max_mm:
-            z -= step
-            travelled += step
-            move_xyz(mx, my, z, feed=config.FEED_APPROACH if step < 0.5 else config.FEED_Z)
-            if z_endstop_triggered():
-                return True
-        return False
-
-    if not descend(config.Z_PROBE_STEP_MM, config.Z_PROBE_MAX_MM):
-        log_gcode("⚠️ Capteur jamais déclenché : pièce de référence absente ou mal placée ?")
-        status_msg = f"⚠️ Homing Z raté : la pièce {ref} est-elle bien en place ?"
-        send_gcode_raw("G91")
-        send_gcode_raw(f"G0 Z30 F{config.FEED_Z}")   # remontée relative, jamais bloquée
-        send_gcode_raw("G90")
-        send_gcode_raw("M400")
-        last_position['z'] = z + 30
-        return False
-    # Second passage fin : remonte un peu puis redescend par petits pas
-    z += 2 * config.Z_PROBE_STEP_MM
-    move_xyz(mx, my, z)
-    if not descend(config.Z_PROBE_FINE_MM, 4 * config.Z_PROBE_STEP_MM):
-        log_gcode("⚠️ Second passage du capteur raté")
-        return False
-
-    send_gcode_raw(f"G92 Z{config.Z_REF_VALUE:.2f}")
-    last_position['z'] = config.Z_REF_VALUE
     homed = True
     save_z_state()
-    log_gcode(f"✅ Homing terminé : capteur déclenché sur {ref}, Z = {config.Z_REF_VALUE}")
-    # Remonte de 2 mm puis place l'aimant au centre de la case devant (le roi en e1)
-    king_sq = ref[0] + str(int(ref[1]) - 1)
-    move_xyz(mx, my, config.Z_REF_VALUE + 2)
-    kx, ky = calculate_xy(king_sq)
-    move_xyz(kx, ky, config.Z_REF_VALUE + 2)
-    log_gcode(f"Aimant au-dessus de {king_sq} : descendez en Z, aimant ON, jusqu'à soulever la pièce.")
+    log_gcode(f"✅ Homing terminé ({duree:.0f} s) : X{pos['x']} Y{pos['y']} Z{pos['z']}")
     return True
+
+
+def hover_over_check_square():
+    """Place l'aimant au-dessus du roi e1 (vérification visuelle de la hauteur et du centrage)."""
+    sq = config.VERIFY_SQUARE
+    x, y = calculate_xy(sq)
+    z_safe = max(travel_z() if pick_ready() else config.Z_BEFORE_PICK_CALIB, last_position['z'])
+    lift_to(z_safe)
+    move_xyz(x, y, z_safe)
+    if surface_z() is not None:
+        z = pick_z('k') + config.HOVER_MM
+        move_xyz(x, y, z + config.PICK_APPROACH_MM)
+        move_xyz(x, y, z, feed=config.FEED_APPROACH)
+        log_gcode(f"Aimant {config.HOVER_MM:g} mm au-dessus de la vis en {sq}")
+    else:
+        log_gcode(f"Aimant au-dessus de {sq} : descendez Z (aimant ON) jusqu'à soulever la pièce, puis 📌")
 
 
 _magnet_on_since = None   # timestamp d'activation (watchdog anti-surchauffe)
@@ -492,7 +403,7 @@ def travel_z():
     heights = [h for h in (piece_height(t) for t in PIECE_TYPES) if h is not None]
     if heights and surface_z() is not None:
         return surface_z() + max(heights) + config.PICK_CLEARANCE_MM
-    return config.PICK_GOTO_Z
+    return config.Z_BEFORE_PICK_CALIB if homed else config.PICK_GOTO_Z
 
 # =============================================================================
 # GESTION CAMÉRA (JETSON CSI / USB) — ROBUSTE
@@ -1233,10 +1144,31 @@ def api_startup_home():
             startup_state = "homing"
             status_msg = "Démarrage : mise en position du robot..."
             if home_axes():
-                startup_state = "verif"
-                status_msg = "Vérifiez que l'aimant est juste au-dessus du roi e1."
+                startup_state = "retrait"
+                status_msg = "Retirez le pion de référence du centre du plateau."
             else:
                 startup_state = "erreur"
+        finally:
+            robot_busy.release()
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/startup/removed', methods=['POST'])
+def api_startup_removed():
+    """Pion de référence retiré : l'aimant va au-dessus du roi e1 pour vérification."""
+    global startup_state, status_msg
+    if not homed:
+        return jsonify({"status": "error", "msg": "Homing non fait."}), 400
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+
+    def run():
+        global startup_state, status_msg
+        try:
+            hover_over_check_square()
+            startup_state = "verif"
+            status_msg = f"Vérifiez que l'aimant est juste au-dessus du roi {config.VERIFY_SQUARE}."
         finally:
             robot_busy.release()
     threading.Thread(target=run, daemon=True).start()
@@ -1565,7 +1497,7 @@ def cmd_home():
     global last_position
     if not robot_busy.acquire(blocking=False):
         return jsonify({"status": "busy", "msg": "Robot déjà en mouvement (homing en cours ?)"}), 409
-    log_gcode(f"MOTEURS : Homing (X/Y puis capteur sur {config.Z_REF_SQUARE})")
+    log_gcode("MOTEURS : Homing G28 (pion de référence au centre du plateau)")
 
     def run():
         try:
@@ -1800,32 +1732,6 @@ def api_magnet_test():
     return jsonify({"status": "ok", "msg": f"{on} pendant 2 s puis {off}. Le relais a-t-il claqué ?"})
 
 
-@app.route('/cmd/home_xy', methods=['POST'])
-def cmd_home_xy():
-    """
-    Homing X/Y seul (Z inconnu) puis capteur au-dessus de la case de référence, à la
-    hauteur actuelle. Sert à mesurer le décalage aimant → capteur.
-    """
-    if not robot_busy.acquire(blocking=False):
-        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
-    try:
-        z0 = 150.0   # coordonnée arbitraire : autorise les descentes manuelles
-        send_gcode_raw(f"G92 Z{z0:.1f}")
-        send_gcode_raw("G91")
-        send_gcode_raw(f"G0 Z{config.Z_LIFT_BEFORE_XY:.1f} F{config.FEED_Z}")
-        send_gcode_raw("G90")
-        send_gcode_raw("M400")
-        if not send_gcode_raw("G28 X Y"):
-            return jsonify({"status": "error", "msg": "Homing X/Y non confirmé."}), 500
-        pos = read_marlin_position()
-        mx, my = sensor_square_to_magnet_xy(config.Z_REF_SQUARE)
-        move_xyz(mx, my, pos['z'])
-        return jsonify({"status": "ok", "x": round(mx, 2), "y": round(my, 2), "z": pos['z'],
-                        "msg": f"Capteur estimé au-dessus de {config.Z_REF_SQUARE} : ajustez X / Y puis 📌"})
-    finally:
-        robot_busy.release()
-
-
 @app.route('/api/pick/save', methods=['POST'])
 def api_pick_save():
     """
@@ -1839,13 +1745,6 @@ def api_pick_save():
     if what in ('a1', 'h1', 'a8'):
         pick_calib[what] = [round(pos['x'], 2), round(pos['y'], 2)]
         msg = f"{what} = X{pos['x']:.1f} Y{pos['y']:.1f}"
-    elif what == 'sensor':
-        # Le CAPTEUR est au centre de la case de référence : on en déduit le décalage aimant → capteur
-        rx, ry = calculate_xy(config.Z_REF_SQUARE)
-        pick_calib['sensor_offset'] = [round(rx - pos['x'], 2), round(ry - pos['y'], 2)]
-        dx, dy = pick_calib['sensor_offset']
-        msg = (f"Capteur centré sur {config.Z_REF_SQUARE} : décalage aimant → capteur "
-               f"X{dx:+.1f} Y{dy:+.1f} mm ({(dx * dx + dy * dy) ** 0.5:.1f} mm)")
     elif what == 'surface':
         pick_calib['z_surface'] = round(pos['z'], 2)
         msg = f"Surface du plateau = Z{pos['z']:.1f}"
