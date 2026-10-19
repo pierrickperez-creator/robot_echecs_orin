@@ -175,6 +175,10 @@ def move_to_vision_position():
 def move_xyz(x, y, z, feed=None):
     """Déplacement absolu avec attente de fin de mouvement."""
     global last_position
+    z_max = getattr(config, 'Z_MAX_SAFE', None)
+    if z_max is not None and z > z_max:
+        log_gcode(f"⚠️ Z{z:.1f} demandé, limité à Z{z_max:.1f} (butée haute)")
+        z = z_max
     last_position = {'x': round(x, 2), 'y': round(y, 2), 'z': round(z, 2)}
     send_gcode_raw("G90")
     cmd = f"G0 X{x:.2f} Y{y:.2f} Z{z:.2f} F{feed or config.FEED_TRAVEL}"
@@ -1591,6 +1595,9 @@ def cmd_manual():
     global last_position
     axis = request.json.get('axis', 'X').upper()
     dist = float(request.json.get('dist', 0))
+    z_max = getattr(config, 'Z_MAX_SAFE', None)
+    if axis == 'Z' and homed and z_max is not None and last_position['z'] + dist > z_max:
+        dist = max(0.0, z_max - last_position['z'])
     feed = int(request.json.get('feed', 2000))
     send_gcode_raw("G91")  # Relatif
     send_gcode_raw(f"G0 {axis}{dist:.1f} F{feed}")

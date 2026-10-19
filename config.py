@@ -43,7 +43,8 @@ Z_SAFE_REL     = 50.0
 #   - La tête est centrée en X (VISION_X)
 VISION_X       = 100.0        # mm — tête centrée horizontalement
 VISION_Y       = 180.0        # mm — réglé sur la machine : tout l'échiquier 8x8 dans le champ
-Z_VISION       = 150.0        # mm — hauteur de la tête (à 100 mm seules les rangées 3-8 étaient visibles)
+Z_VISION       = 115.0        # mm — repère du homing sur pion central (≈ Z150 de l'ancien repère plateau)
+Z_MAX_SAFE     = 120.0        # mm — jamais au-dessus : à Z150 (nouveau repère) la tête a touché la butée haute
 
 FEED_TRAVEL    = 4000.0
 # Le PLATEAU bouge en Y avec les pièces dessus : démarrages et arrêts en douceur.
