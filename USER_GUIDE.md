@@ -164,7 +164,7 @@ Le robot joue les Blancs et commence :
 ### Avant la première partie : calibrer la caméra (une seule fois)
 
 1. Page **🎮 Manuel**, faites un **🏠 HOME G28**
-2. Videz le plateau et posez **4 dames noires au centre des 4 cases d'angle** de la grille 10×10
+2. Videz le plateau et posez **4 dames noires sur a1, h1, a8 et h8**
 3. Appuyez sur **🎯 CALIBRER CAMÉRA** : la tête va en position caméra et repère les 4 dames
 4. Remettez les pièces en position de départ, appuyez sur **📸 PHOTO RÉFÉRENCE**
 5. Touchez l'image sous les boutons : les noms de cases (a1, e4…) doivent correspondre au vrai plateau. Sinon, ajustez `VISION_FLIP_FILES`, `VISION_FLIP_RANKS` ou `VISION_SWAP_AXES` dans `config.py`
@@ -281,7 +281,7 @@ Cette page permet de contrôler manuellement les moteurs du robot sans jouer aux
 
 **Boutons d'action** :
 - **🏠 HOME G28** : Remet la tête en position d'origine (indispensable avant toute utilisation)
-- **📷 POSITION CAMÉRA** : Déplace la tête en position de photo (plateau reculé au maximum, tête levée à 10 cm) — utile pour vérifier que la caméra voit bien tout le plateau
+- **📷 POSITION CAMÉRA** : Déplace la tête en position de photo (Y 180, tête levée à 15 cm : tout l'échiquier est visible) — utile pour vérifier que la caméra voit bien tout le plateau
 - **📌 DÉFINIR POSITION HOME** : Enregistre la position actuelle comme nouvelle origine
 - **⛔ URGENCE** : Arrêt immédiat de tous les moteurs
 

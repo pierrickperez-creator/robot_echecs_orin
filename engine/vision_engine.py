@@ -77,7 +77,7 @@ class VisionEngine:
 
     def auto_calibrate(self, frame):
         """
-        Détecte les 4 Dames Noires aux coins du plateau.
+        Détecte les 4 Dames Noires posées sur a1, h1, a8 et h8 (plateau vide autour).
         Le plateau est de 200x200mm, soit 10x10 cases de 20mm.
         Retourne True si la calibration a réussi.
         """
@@ -89,16 +89,34 @@ class VisionEngine:
         # 2. Trouver les contours des marqueurs
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        centers = []
+        h_img, w_img = gray.shape
+        candidates = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
             # Filtre par taille (ni trop petit comme du bruit, ni trop gros)
-            if 100 < area < 5000:
-                M = cv2.moments(cnt)
-                if M["m00"] != 0:
-                    cX = int(M["m10"] / M["m00"])
-                    cY = int(M["m01"] / M["m00"])
-                    centers.append((cX, cY))
+            if not 150 < area < 5000:
+                continue
+            # Une dame vue de dessus est ronde : on écarte les formes allongées
+            # (cadre de l'imprimante, pinces, bordures) et tout ce qui touche le bord de l'image.
+            x, y, w, h = cv2.boundingRect(cnt)
+            if x <= 2 or y <= 2 or x + w >= w_img - 2 or y + h >= h_img - 2:
+                continue
+            peri = cv2.arcLength(cnt, True)
+            if peri == 0 or 4 * np.pi * area / (peri * peri) < 0.65:
+                continue
+            M = cv2.moments(cnt)
+            if M["m00"] != 0:
+                candidates.append((int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])))
+
+        # S'il reste des intrus, on garde les 4 points qui forment le plus grand quadrilatère
+        centers = candidates
+        if len(candidates) > 4:
+            import itertools
+            best_area = -1
+            for quad in itertools.combinations(candidates[:10], 4):
+                hull = cv2.convexHull(np.array(quad, dtype=np.float32))
+                if len(hull) == 4 and cv2.contourArea(hull) > best_area:
+                    best_area, centers = cv2.contourArea(hull), list(quad)
 
         self.last_marker_count = len(centers)
         if len(centers) != 4:
@@ -109,11 +127,12 @@ class VisionEngine:
         centers = self._sort_points(np.array(centers))
 
         # 4. Calculer l'homographie vers un carré de 400x400 px (10 cases de 40 px).
-        # Les dames sont posées AU CENTRE des 4 cases d'angle de la grille 10x10.
-        if getattr(config, "VISION_MARKERS_AT_CELL_CENTERS", True):
-            lo, hi = 20, 380
+        # Les dames sont au centre de a1/h1/a8/h8 (cellules 1 et 8 de la grille 10x10),
+        # ou, en mode ancien, au centre des 4 cases d'angle de la grille 10x10.
+        if getattr(config, "VISION_CALIB_SQUARES", True):
+            lo, hi = 60, 340
         else:
-            lo, hi = 0, 399
+            lo, hi = 20, 380
         dst_pts = np.array([
             [lo, lo],
             [hi, lo],

@@ -61,6 +61,18 @@ def log_gcode(msg):
         gcode_log_buffer.pop(0)
     print(formatted)
 
+def find_marlin_port():
+    """Port configuré s'il existe, sinon premier adaptateur série USB trouvé."""
+    import glob
+    if os.path.exists(config.MARLIN_PORT):
+        return config.MARLIN_PORT
+    for pattern in ("/dev/serial/by-id/*FTDI*", "/dev/ttyUSB*", "/dev/ttyACM*"):
+        found = sorted(glob.glob(pattern))
+        if found:
+            log_gcode(f"Port {config.MARLIN_PORT} absent, utilisation de {found[0]}")
+            return found[0]
+    return config.MARLIN_PORT
+
 def init_printer():
     global ser
     if config.SIMULATION_MODE:
@@ -70,12 +82,13 @@ def init_printer():
         log_gcode("AVERTISSEMENT : bibliothèque serial non installée.")
         return
     try:
-        ser = serial.Serial(config.MARLIN_PORT, config.MARLIN_BAUD, timeout=1)
+        port = find_marlin_port()
+        ser = serial.Serial(port, config.MARLIN_BAUD, timeout=1)
         time.sleep(2)  # Attente reboot Marlin
         ser.reset_input_buffer()
         send_gcode_raw("M92 Z400")  # Calibration Z
         magnet(False)               # Forcer relais OFF immédiatement dès la connexion
-        log_gcode(f"✅ Marlin connecté sur {config.MARLIN_PORT} — relais OFF")
+        log_gcode(f"✅ Marlin connecté sur {port} — relais OFF")
     except Exception as e:
         log_gcode(f"ERREUR CONNEXION MARLIN : {e}")
         ser = None
@@ -1032,7 +1045,7 @@ def api_validate_move():
 
 @app.route('/api/vision/calibrate', methods=['POST'])
 def api_vision_calibrate():
-    """Calibration : plateau vide sauf 4 dames noires au centre des 4 cases d'angle."""
+    """Calibration : plateau vide sauf 4 dames noires sur a1, h1, a8 et h8."""
     if not robot_busy.acquire(blocking=False):
         return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
     try:
@@ -1045,7 +1058,7 @@ def api_vision_calibrate():
             n = getattr(vision_engine, 'last_marker_count', 0)
             return jsonify({"status": "error",
                             "msg": f"{n} marqueur(s) trouvé(s) au lieu de 4. "
-                                   "Plateau vide + 4 dames noires au centre des cases d'angle."}), 400
+                                   "Plateau vide + 4 dames noires sur a1, h1, a8 et h8."}), 400
         vision_engine.save_calibration()
         log_gcode("📷 Calibration caméra réussie et enregistrée.")
         return jsonify({"status": "ok", "msg": "Calibration réussie et enregistrée."})
