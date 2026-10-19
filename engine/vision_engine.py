@@ -81,42 +81,51 @@ class VisionEngine:
         Le plateau est de 200x200mm, soit 10x10 cases de 20mm.
         Retourne True si la calibration a réussi.
         """
-        # 1. Prétraitement
+        # 1. Prétraitement : zones très sombres (pièces noires sur bois clair)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # On cherche des zones très sombres (les dames noires sur fond clair)
         _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY_INV)
-
-        # 2. Trouver les contours des marqueurs
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
         h_img, w_img = gray.shape
-        candidates = []
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            # Filtre par taille (ni trop petit comme du bruit, ni trop gros)
-            if not 150 < area < 5000:
-                continue
-            # Une dame vue de dessus est ronde : on écarte les formes allongées
-            # (cadre de l'imprimante, pinces, bordures) et tout ce qui touche le bord de l'image.
-            x, y, w, h = cv2.boundingRect(cnt)
-            if x <= 2 or y <= 2 or x + w >= w_img - 2 or y + h >= h_img - 2:
-                continue
-            peri = cv2.arcLength(cnt, True)
-            if peri == 0 or 4 * np.pi * area / (peri * peri) < 0.65:
-                continue
-            M = cv2.moments(cnt)
-            if M["m00"] != 0:
-                candidates.append((int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])))
+        center = np.array([w_img / 2, h_img / 2])
 
+        # 2. Taches sombres assez grosses pour être une pièce (le cadre, les pinces sont plus petits)
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(thresh)
+        blobs = []
+        for i in range(1, n):
+            if stats[i, cv2.CC_STAT_AREA] < 0.0025 * w_img * h_img:
+                continue
+            ys, xs = np.nonzero(labels == i)
+            pts = np.c_[xs, ys].astype(np.float32)
+            # Vues par une caméra grand angle, les pièces hautes "penchent" vers l'extérieur :
+            # le socle est la partie de la silhouette la plus proche du centre de l'image.
+            dist = np.linalg.norm(pts - center, axis=1)
+            k = max(20, int(len(pts) * 0.4))
+            blobs.append((stats[i, cv2.CC_STAT_AREA], pts[np.argsort(dist)[:k]].mean(axis=0)))
+
+        candidates = [tuple(p) for _, p in sorted(blobs, key=lambda b: -b[0])]
         # S'il reste des intrus, on garde les 4 points qui forment le plus grand quadrilatère
         centers = candidates
         if len(candidates) > 4:
             import itertools
             best_area = -1
-            for quad in itertools.combinations(candidates[:10], 4):
+            for quad in itertools.combinations(candidates[:8], 4):
                 hull = cv2.convexHull(np.array(quad, dtype=np.float32))
                 if len(hull) == 4 and cv2.contourArea(hull) > best_area:
                     best_area, centers = cv2.contourArea(hull), list(quad)
+
+        # Le point trouvé est légèrement décalé vers le centre : on le repousse
+        # de ~0,2 case vers l'extérieur (taille de case estimée sur l'écart entre repères).
+        if len(centers) == 4:
+            pts = np.array(centers, dtype=np.float32)
+            side = np.mean([np.linalg.norm(pts[i] - pts[j]) for i in range(4) for j in range(i + 1, 4)
+                            if np.linalg.norm(pts[i] - pts[j]) < 1.2 * np.median(
+                                [np.linalg.norm(pts[a_] - pts[b_]) for a_ in range(4) for b_ in range(a_ + 1, 4)])])
+            square_px = side / 7.0
+            out = []
+            for p in pts:
+                v = p - center
+                norm = np.linalg.norm(v)
+                out.append(tuple(p + (v / norm) * 0.2 * square_px if norm > 0 else p))
+            centers = out
 
         self.last_marker_count = len(centers)
         if len(centers) != 4:
