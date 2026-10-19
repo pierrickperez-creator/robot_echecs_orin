@@ -876,7 +876,7 @@ def execute_move_sequence(board_before, move):
             status_msg = f"Robot a joué {move.uci()}. À vous : jouez puis appuyez sur J'AI JOUÉ."
     finally:
         if not game_engine.is_game_over():
-            game_engine.start_clock()   # au joueur : son temps ne court qu'à partir de maintenant
+            game_engine.start_clock(game_engine.board.turn)   # au joueur, une fois le robot revenu
         robot_busy.release()
 
 
@@ -1144,6 +1144,9 @@ def api_status():
         'clock_minutes': round(game_engine.initial_time / 60, 1),
         'moves': moves,
         'robot_busy': robot_busy.locked(),
+        'clock_side': (None if not game_engine.clock_running else
+                       ('white' if (game_engine.board.turn if game_engine.clock_side is None
+                                    else game_engine.clock_side) else 'black')),
         'startup_state': startup_state,
         'homed': homed,
         'pick_ready': pick_ready(),
@@ -1247,6 +1250,17 @@ def api_startup_home():
         finally:
             robot_busy.release()
     threading.Thread(target=run, daemon=True).start()
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/startup/reset', methods=['POST'])
+def api_startup_reset():
+    """Relance la procédure de démarrage guidée (pion de référence, homing, vérification)."""
+    global startup_state, homed
+    if robot_busy.locked():
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+    startup_state = "attente"
+    homed = False
     return jsonify({"status": "ok"})
 
 
@@ -1384,6 +1398,7 @@ def api_bot_move():
                         "msg": "Calibrez d'abord les prises (page Manuel) : " + ", ".join(pick_missing())}), 400
     if not robot_busy.acquire(blocking=False):
         return jsonify({"status": "busy", "msg": "Le robot est déjà en train de jouer."}), 409
+    game_engine.start_clock(game_engine.board.turn)   # temps du robot : réflexion + mouvements
     move = start_robot_reply()
     if not move:
         return jsonify({"status": "error"}), 500
@@ -1462,7 +1477,7 @@ def api_validate_move():
 
     san = game_engine.board.san(move)
     game_engine.board.push(move)
-    game_engine.stop_clock()
+    game_engine.start_clock(game_engine.board.turn)   # le temps du robot court : réflexion + mouvements
     log_gcode(f"JOUEUR JOUE : {move.uci()} ({san}, {source})")
     if game_engine.is_game_over():
         robot_busy.release()

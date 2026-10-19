@@ -16,6 +16,7 @@ class ChessEngine:
         self.time_black = self.initial_time
         self.last_tick = time.time()
         self.clock_running = False
+        self.clock_side = None        # couleur dont le temps s'écoule (None = celle qui a le trait)
 
         # --- Compteurs de Dames de réserve utilisées ---
         self.used_white_queens = 0
@@ -36,12 +37,20 @@ class ChessEngine:
         dt = now - self.last_tick
         self.last_tick = now
 
-        if self.board.turn == chess.WHITE:
+        side = self.board.turn if self.clock_side is None else self.clock_side
+        if side == chess.WHITE:
             self.time_white = max(0.0, self.time_white - dt)
         else:
             self.time_black = max(0.0, self.time_black - dt)
 
-    def start_clock(self):
+    def start_clock(self, side=None):
+        """
+        Fait courir le temps de `side` (chess.WHITE / chess.BLACK). Le robot garde son
+        horloge pendant qu'il réfléchit ET qu'il déplace ses pièces, même si le trait
+        est déjà passé au joueur.
+        """
+        self.update_clock()
+        self.clock_side = side
         self.clock_running = True
         self.last_tick = time.time()
 
@@ -79,6 +88,7 @@ class ChessEngine:
         self.time_white = self.initial_time
         self.time_black = self.initial_time
         self.clock_running = False
+        self.clock_side = None
         self.used_white_queens = 0
         self.used_black_queens = 0
 

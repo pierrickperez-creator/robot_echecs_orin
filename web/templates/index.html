@@ -166,7 +166,8 @@
         .btn-stop  { background: #c0392b; grid-column: span 2; font-size: 16px; }
 
         /* Bouton JOUER ROBOT — état d'attente */
-        #btn-play-robot { grid-column: span 2; font-size: 15px; transition: 0.2s; }
+        #btn-play-robot { grid-column: span 2; font-size: 26px; padding: 26px 10px; min-height: 90px;
+                          border-radius: 12px; transition: 0.2s; }
         #btn-play-robot.ready {
             background: #27ae60;
             animation: pulse-green 1.2s infinite;
@@ -190,7 +191,9 @@
         }
         #startup-modal.show { display: flex; }
         .startup-box { background: #1c2833; border: 3px solid #f39c12; border-radius: 14px;
-                       padding: 22px 26px; text-align: center; max-width: 560px; }
+                       padding: 22px 26px; text-align: center; max-width: 560px; position: relative; }
+        #startup-close { position: absolute; top: 6px; right: 8px; background: none; color: #aaa;
+                         font-size: 30px; padding: 4px 12px; line-height: 1; }
         .startup-box h2 { margin: 0 0 10px; color: #f1c40f; }
         #startup-text { font-size: 16px; color: #ddd; line-height: 1.5; margin-bottom: 16px; }
         .startup-box button { padding: 16px 30px; font-size: 18px; margin: 4px; }
@@ -468,6 +471,7 @@
 <!-- Modale de démarrage (homing sur la pièce de référence) -->
 <div id="startup-modal">
     <div class="startup-box">
+        <button id="startup-close" onclick="startupDismiss()" title="Fermer">✕</button>
         <h2>🤖 Démarrage du robot</h2>
         <div id="startup-text"></div>
         <div id="startup-buttons"></div>
@@ -654,6 +658,7 @@ let actionPending = false;
 function mainAction() {
     const btn = document.getElementById('btn-play-robot');
     if (btn.classList.contains('waiting') || actionPending) return;
+    if (btn.dataset.mode === 'startup') { startupReopen(); return; }
     if (btn.dataset.mode === 'human') validateMove();
     else if (btn.dataset.mode === 'robot') playRobotMove();
 }
@@ -705,10 +710,17 @@ function validateMove(uci) {
 
 // ─── Démarrage : homing piloté depuis l'écran ─────────────────────────────
 let startupShown = '';
+let startupDismissed = '';   // état dans lequel l'utilisateur a fermé la fenêtre (croix)
+function startupDismiss() {
+    startupDismissed = startupShown;
+    document.getElementById('startup-modal').classList.remove('show');
+}
+function startupReopen() { startupDismissed = ''; startupShown = ''; pollStatus(); }
 function updateStartup(d) {
     const st = d.startup_state || 'pret';
     const modal = document.getElementById('startup-modal');
-    if (st === 'pret') { modal.classList.remove('show'); startupShown = ''; return; }
+    if (st === 'pret') { modal.classList.remove('show'); startupShown = ''; startupDismissed = ''; return; }
+    if (st === startupDismissed && st !== 'homing') return;   // fermée : on ne la réimpose pas
     if (st === startupShown) return;
     startupShown = st;
     const text = document.getElementById('startup-text');
@@ -743,6 +755,11 @@ function updateMainButton(d) {
     const btn    = document.getElementById('btn-play-robot');
     const banner = document.getElementById('safety-banner');
     banner.classList.remove('show', 'info');
+    if (d.startup_state && d.startup_state !== 'pret') {
+        btn.className = 'ready'; btn.dataset.mode = 'startup';
+        btn.textContent = '▶ DÉMARRER LE ROBOT';
+        return;
+    }
     if (d.game_over) {
         setBusyButton('🏁 Partie terminée');
     } else if (d.robot_busy) {
@@ -803,7 +820,10 @@ function onTouchBoard(event) {
     refreshTouchBoard();
 }
 
-function goHome()       { fetch('/cmd/home',{method:'POST'}); }
+function goHome() {
+    // Le homing exige le pion de référence au centre : on passe par la procédure guidée
+    fetch('/api/startup/reset', {method:'POST'}).then(()=>startupReopen());
+}
 function undoLastMove() { fetch('/api/undo',{method:'POST'}).then(()=>refreshBoard()); }
 function resetGame() {
     document.getElementById('color-modal').classList.add('show');
@@ -942,9 +962,17 @@ function renderMoveHistory(moves) {
     }
     el.innerHTML = html;
     el.scrollTop = el.scrollHeight;
-    // Miroir dans le panneau gauche (derniers coups visibles)
+    // Panneau gauche (sous le plateau) : seulement les derniers coups, les plus récents visibles
     const left = document.getElementById('left-move-history');
-    if (left) left.innerHTML = html;
+    if (left) {
+        let last = '';
+        const start = Math.max(0, moves.length - 8) - (Math.max(0, moves.length - 8) % 2);
+        for (let i = start; i < moves.length; i += 2) {
+            last += `<span class="n">${Math.floor(i/2)+1}. </span><span class="w">${moves[i]}</span> `;
+            if (moves[i+1]) last += `<span class="b">${moves[i+1]}</span> `;
+        }
+        left.innerHTML = (start > 0 ? '<span class="n">… </span>' : '') + last;
+    }
 }
 
 // ─── GCode Log ────────────────────────────────────────────────────────────
@@ -983,8 +1011,9 @@ function pollStatus() {
         // Horloges
         document.getElementById('time-white').textContent = fmtTime(d.time_white||0);
         document.getElementById('time-black').textContent = fmtTime(d.time_black||0);
-        document.getElementById('clock-white').classList.toggle('active', d.turn==='white');
-        document.getElementById('clock-black').classList.toggle('active', d.turn==='black');
+        const side = d.clock_side !== undefined ? d.clock_side : d.turn;
+        document.getElementById('clock-white').classList.toggle('active', side==='white');
+        document.getElementById('clock-black').classList.toggle('active', side==='black');
         if (d.clock_enabled!==undefined) {
             const cb=document.getElementById('clock-toggle');
             if (cb.checked!==d.clock_enabled) cb.checked=d.clock_enabled;
