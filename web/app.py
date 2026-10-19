@@ -83,6 +83,9 @@ def init_printer():
         return
     try:
         port = find_marlin_port()
+        # Sans -hupcl, la fermeture/réouverture du port fait basculer DTR, ce qui redémarre la
+        # carte Marlin : elle oublie alors son homing à chaque redémarrage du serveur.
+        subprocess.run(['stty', '-F', port, '-hupcl'], capture_output=True)
         ser = serial.Serial(port, config.MARLIN_BAUD, timeout=1)
         time.sleep(2)  # Attente reboot Marlin
         ser.reset_input_buffer()
@@ -1795,6 +1798,32 @@ def api_magnet_test():
     send_gcode_raw(off)
     log_gcode(f"🧲 Test relais ({mode}) : {on} puis {off}")
     return jsonify({"status": "ok", "msg": f"{on} pendant 2 s puis {off}. Le relais a-t-il claqué ?"})
+
+
+@app.route('/cmd/home_xy', methods=['POST'])
+def cmd_home_xy():
+    """
+    Homing X/Y seul (Z inconnu) puis capteur au-dessus de la case de référence, à la
+    hauteur actuelle. Sert à mesurer le décalage aimant → capteur.
+    """
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+    try:
+        z0 = 150.0   # coordonnée arbitraire : autorise les descentes manuelles
+        send_gcode_raw(f"G92 Z{z0:.1f}")
+        send_gcode_raw("G91")
+        send_gcode_raw(f"G0 Z{config.Z_LIFT_BEFORE_XY:.1f} F{config.FEED_Z}")
+        send_gcode_raw("G90")
+        send_gcode_raw("M400")
+        if not send_gcode_raw("G28 X Y"):
+            return jsonify({"status": "error", "msg": "Homing X/Y non confirmé."}), 500
+        pos = read_marlin_position()
+        mx, my = sensor_square_to_magnet_xy(config.Z_REF_SQUARE)
+        move_xyz(mx, my, pos['z'])
+        return jsonify({"status": "ok", "x": round(mx, 2), "y": round(my, 2), "z": pos['z'],
+                        "msg": f"Capteur estimé au-dessus de {config.Z_REF_SQUARE} : ajustez X / Y puis 📌"})
+    finally:
+        robot_busy.release()
 
 
 @app.route('/api/pick/save', methods=['POST'])

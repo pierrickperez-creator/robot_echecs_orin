@@ -223,7 +223,10 @@
             0. Capteur : placez le CAPTEUR (pas l'aimant) juste au-dessus de la vis du pion e2
             avec X / Y, sans le faire toucher, puis 📌. À faire une fois avant le premier HOME.
         </div>
-        <button class="btn-teal" style="width:100%" onclick="pickSave('sensor')">📌 Capteur centré sur e2</button>
+        <div class="btn2">
+            <button class="btn-blue" onclick="homeXY()">Homing X/Y + capteur sur e2</button>
+            <button class="btn-teal" onclick="pickSave('sensor')">📌 Capteur centré sur e2</button>
+        </div>
         <div style="font-size:11px;color:#ccc;margin:4px 0 2px">
             1. Hauteur : après 🏠 HOME (le capteur se pose sur le pion e2), l'aimant est au-dessus du roi e1.
             Aimant ON, descendez Z par petits pas jusqu'à ce que le roi se soulève, puis 📌.
@@ -490,6 +493,13 @@ function pickSave(what) {
     fetch('/api/pick/save', {method: 'POST', headers: {'Content-Type': 'application/json'},
                              body: JSON.stringify({what})})
     .then(r => r.json()).then(d => { pickMsg((d.status === 'ok' ? '✅ ' : '❌ ') + d.msg); pickRefresh(); });
+}
+function homeXY() {
+    pickMsg('⏳ Homing X/Y...');
+    fetch('/cmd/home_xy', {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.status === 'ok') updatePosition(d.x, d.y, d.z);
+        pickMsg((d.status === 'ok' ? '👀 ' : '❌ ') + d.msg);
+    });
 }
 function pickHover(square) {
     pickMsg('Survol de ' + square + '...');
