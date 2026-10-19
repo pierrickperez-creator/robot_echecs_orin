@@ -54,6 +54,7 @@ class ChessEngine:
         Règle la force de Stockfish. UCI_Elo a un minimum (1350 sur Stockfish 14) :
         en dessous, on passe par 'Skill Level' (0-20), sinon Stockfish jouerait à pleine force.
         """
+        self.elo = int(elo)
         if not self.engine:
             return
         elo = int(elo)
@@ -102,8 +103,26 @@ class ChessEngine:
             print("[ERREUR] Moteur IA absent.")
             return None
         try:
-            # Temps de réflexion
-            limit = chess.engine.Limit(time=STOCKFISH_MOVE_TIME)
+            import random
+            elo = getattr(self, 'elo', 1500)
+            if elo < 1350:
+                # Même au niveau 0, Stockfish joue autour de 1300 : pour un vrai débutant,
+                # on ajoute des coups au hasard et on limite la profondeur de calcul.
+                blunder = 0.6 * (1350 - elo) / 1250          # 100 Elo → 60 %, 800 → 26 %
+                if random.random() < blunder:
+                    legal = list(self.board.legal_moves)
+                    # évite quand même de rater un mat en un coup évident
+                    for m in legal:
+                        self.board.push(m)
+                        mate = self.board.is_checkmate()
+                        self.board.pop()
+                        if mate:
+                            return m
+                    return random.choice(legal)
+                depth = 1 if elo < 600 else 2 if elo < 1000 else 4
+                limit = chess.engine.Limit(depth=depth, time=STOCKFISH_MOVE_TIME)
+            else:
+                limit = chess.engine.Limit(time=STOCKFISH_MOVE_TIME)
             result = self.engine.play(self.board, limit)
             return result.move
         except Exception as e:

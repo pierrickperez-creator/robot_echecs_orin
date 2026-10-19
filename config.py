@@ -52,6 +52,8 @@ FEED_TRAVEL    = 4000.0
 Y_MAX_ACCEL    = 250          # mm/s² (firmware : 1000)
 TRAVEL_ACCEL   = 1000         # mm/s² accélération des déplacements (firmware : 3000)
 XY_JERK        = 5            # mm/s  changement de vitesse instantané (firmware : 20)
+Z_MAX_FEED     = 14           # mm/s  vitesse max Z (firmware : 8). Si Z perd des pas (homing faux), baisser.
+Z_MAX_ACCEL    = 80           # mm/s² accélération Z (firmware : 20)
 FEED_Z         = 1000.0
 
 # --- ZONES DE STOCKAGE (EN FORME DE U) ---

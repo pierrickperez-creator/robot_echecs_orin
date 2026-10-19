@@ -101,6 +101,10 @@ def init_printer():
         send_gcode_raw(f"M201 Y{config.Y_MAX_ACCEL}")
         send_gcode_raw(f"M204 T{config.TRAVEL_ACCEL}")
         send_gcode_raw(f"M205 X{config.XY_JERK}")
+        # Axe Z plus rapide (firmware : 8 mm/s, 20 mm/s²) : les montées en position caméra
+        # cassaient le rythme de la partie
+        send_gcode_raw(f"M203 Z{config.Z_MAX_FEED}")
+        send_gcode_raw(f"M201 Z{config.Z_MAX_ACCEL}")
         read_marlin_position()      # Marlin garde ses coordonnées si seul le serveur a redémarré
         restore_homing_state()
         log_gcode(f"✅ Marlin connecté sur {port} — relais OFF")
@@ -733,6 +737,21 @@ def lift_to_travel():
     lift_to(travel_z())
 
 
+def history_positions(board):
+    """
+    [(position juste avant le coup, coup), ...] dans l'ordre chronologique.
+    Reconstruit en dépilant une copie : tient compte des corrections faites avec
+    MODIFIER PIÈCE (rejouer depuis la position de départ planterait dans ce cas).
+    """
+    b = board.copy()
+    out = []
+    while b.move_stack:
+        move = b.pop()
+        out.append((b.copy(stack=False), move))
+    out.reverse()
+    return out
+
+
 def graveyard_contents(board):
     """
     Rejoue l'historique de `board` pour retrouver, dans l'ordre, le type de chaque
@@ -740,10 +759,9 @@ def graveyard_contents(board):
     Retourne: (liste_types_blancs, liste_types_noirs) avec chess.PieceType.
     """
     import chess as chess_lib
-    temp = chess_lib.Board()
     white_types = []
     black_types = []
-    for move in board.move_stack:
+    for temp, move in history_positions(board):
         if temp.is_en_passant(move):
             ep_sq = chess_lib.square(
                 chess_lib.square_file(move.to_square),
@@ -758,22 +776,19 @@ def graveyard_contents(board):
                 (white_types if captured.color == chess_lib.WHITE else black_types).append(captured.piece_type)
         if move.promotion:
             (white_types if temp.turn == chess_lib.WHITE else black_types).append(chess_lib.PAWN)
-        temp.push(move)
     return white_types, black_types
 
 
 def queens_used(board):
     """Nombre de dames de réserve déjà utilisées (promotions) : (blancs, noirs)."""
     import chess as chess_lib
-    temp = chess_lib.Board()
     w = b = 0
-    for move in board.move_stack:
+    for temp, move in history_positions(board):
         if move.promotion:
             if temp.turn == chess_lib.WHITE:
                 w += 1
             else:
                 b += 1
-        temp.push(move)
     return w, b
 
 
@@ -860,6 +875,8 @@ def execute_move_sequence(board_before, move):
         else:
             status_msg = f"Robot a joué {move.uci()}. À vous : jouez puis appuyez sur J'AI JOUÉ."
     finally:
+        if not game_engine.is_game_over():
+            game_engine.start_clock()   # au joueur : son temps ne court qu'à partir de maintenant
         robot_busy.release()
 
 
@@ -1099,6 +1116,14 @@ def api_status():
     if clock_enabled:
         game_engine.update_clock()
     outcome = game_engine.board.outcome()
+    # Calculs sur l'historique : ne doivent jamais bloquer l'écran de jeu
+    try:
+        wq, bq = queens_used(game_engine.board)
+        moves = _build_move_history()
+    except Exception as e:
+        log_gcode(f"⚠️ Historique illisible : {e}")
+        wq = bq = 0
+        moves = []
     return jsonify({
         'fen': game_engine.get_fen(),
         'turn': 'white' if game_engine.board.turn else 'black',
@@ -1114,10 +1139,10 @@ def api_status():
         'captured': game_engine.get_captured_pieces(),
         'move_count': len(game_engine.board.move_stack),
         'clock_enabled': clock_enabled,
-        'used_white_queens': queens_used(game_engine.board)[0],
-        'used_black_queens': queens_used(game_engine.board)[1],
+        'used_white_queens': wq,
+        'used_black_queens': bq,
         'clock_minutes': round(game_engine.initial_time / 60, 1),
-        'moves': _build_move_history(),
+        'moves': moves,
         'robot_busy': robot_busy.locked(),
         'startup_state': startup_state,
         'homed': homed,
@@ -1128,14 +1153,12 @@ def api_status():
 
 def _build_move_history():
     """Retourne l'historique des coups en notation SAN."""
-    temp = chess.Board()
     result = []
-    for move in game_engine.board.move_stack:
+    for temp, move in history_positions(game_engine.board):
         try:
             result.append(temp.san(move))
-            temp.push(move)
         except Exception:
-            break
+            result.append(move.uci())
     return result
 
 
@@ -1381,7 +1404,7 @@ def start_robot_reply():
         return None
     board_before = game_engine.board.copy()
     game_engine.board.push(move)
-    game_engine.start_clock()
+    # L'horloge du joueur ne démarre qu'une fois le robot revenu en position (execute_move_sequence)
     threading.Thread(target=execute_move_sequence, args=(board_before, move), daemon=True).start()
     return move
 

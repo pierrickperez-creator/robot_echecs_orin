@@ -53,6 +53,7 @@ class VisionEngine:
         self.reference_frame = None  # Photo du plateau stable (redressée, niveaux de gris)
         self.last_scores = {}        # Score de changement par case (dernière détection)
         self.load_calibration()
+        self.load_piece_db()         # seuils pièces / bois appris avec les socles
 
     # ── Calibration persistante ─────────────────────────────────────────────
     def is_calibrated(self):
@@ -212,7 +213,14 @@ class VisionEngine:
         cur = self._prepare(frame)
         if cur is None or self.reference_frame is None:
             return None
-        diff = cv2.absdiff(self.reference_frame, cur)
+        # Égalise la luminosité générale : une lampe allumée ou un nuage ne doit pas
+        # faire « changer » toutes les cases à la fois.
+        ref = self.reference_frame.astype(np.float32)
+        cur = cur.astype(np.float32)
+        board_ref, board_cur = ref[40:360, 40:360], cur[40:360, 40:360]
+        gain = float(np.median(board_ref)) / max(float(np.median(board_cur)), 1.0)
+        cur = np.clip(cur * gain, 0, 255)
+        diff = cv2.absdiff(ref, cur)
         cell, m = 40, 8  # marge : on ignore les bords de case
         scores = {}
         for sq in range(64):
@@ -249,10 +257,11 @@ class VisionEngine:
         changed = {sq for sq, v in scores.items() if v > thr}
         if not changed:
             return None, "Aucun changement vu sur le plateau."
-        if len(changed) > 6:
-            return None, f"Trop de cases modifiées ({len(changed)}) : main dans le champ ou lumière qui a changé ?"
+        if len(changed) > 12:
+            return None, f"Trop de cases modifiées ({len(changed)}) : main dans le champ ?"
 
-        best, best_key, tie = None, None, False
+        occ = self.square_occupancy(frame)
+        candidates = []
         seen = set()
         for move in board.legal_moves:
             if move.promotion and move.promotion != 5:  # 5 = chess.QUEEN : promotion en dame
@@ -263,21 +272,49 @@ class VisionEngine:
             seen.add(squares)
             if not squares <= changed:
                 continue
-            # Le meilleur coup explique le plus de changements et en laisse le moins
-            key = (-len(changed - squares), len(squares), min(scores[s] for s in squares))
-            if best_key is None or key[:2] > best_key[:2]:
-                best, best_key, tie = move, key, False
-            elif key[:2] == best_key[:2]:
-                tie = True
-                if key[2] > best_key[2]:
-                    best, best_key = move, key
-        if best is None:
+            # Cohérence avec la nouvelle photo : cases vidées vides, cases d'arrivée occupées.
+            # Départage les coups que la perspective rend ambigus (pièce haute qui déborde).
+            after = board.copy(stack=False)
+            after.push(move)
+            if occ is not None:
+                consistency = float(np.mean([occ[q] if after.piece_at(q) else 1.0 - occ[q] for q in squares]))
+            else:
+                consistency = 0.5
+            unexplained = len(changed - squares)
+            candidates.append((consistency, -unexplained, min(scores[q] for q in squares), move))
+        if not candidates:
             import chess
-            names = ", ".join(sorted(chess.square_name(s) for s in changed))
+            names = ", ".join(sorted(chess.square_name(q) for q in changed))
             return None, f"Changements ({names}) ne correspondant à aucun coup légal."
-        if tie:
-            return None, "Plusieurs coups possibles, impossible de trancher."
-        return best, "ok"
+        candidates.sort(key=lambda c: (round(c[0], 2), c[1], c[2]), reverse=True)
+        best = candidates[0]
+        if len(candidates) > 1:
+            second = candidates[1]
+            if abs(best[0] - second[0]) < 0.08 and best[1] == second[1]:
+                return None, "Plusieurs coups possibles, impossible de trancher."
+        if best[0] < 0.3:
+            return None, "Le coup vu ne correspond pas aux cases occupées."
+        return best[3], "ok"
+
+    def square_occupancy(self, frame):
+        """
+        Part (0-1) de chaque case couverte par une pièce, au centre de la case
+        (là où se trouve le socle), d'après le masque pièces / bois.
+        """
+        if self.homography_matrix is None:
+            return None
+        try:
+            warped = self._warp_hi(frame)
+            mask, _ = self._piece_mask(warped)
+        except Exception:
+            return None
+        n, k = self.HI_CELL, self.HI_CELL // 4
+        occ = {}
+        for sq in range(64):
+            c, r = self.square_to_cell(sq)
+            cy, cx = r * n + n // 2, c * n + n // 2
+            occ[sq] = float(mask[cy - k:cy + k, cx - k:cx + k].mean() / 255.0)
+        return occ
 
     # ── Apprentissage des socles (forme ↔ pièce) ─────────────────────────────
     PIECE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
