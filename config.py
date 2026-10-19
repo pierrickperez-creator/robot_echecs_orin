@@ -82,7 +82,7 @@ VISION_DIFF_THRESHOLD = 18     # Écart moyen (0-255) au-delà duquel une case e
 VISION_SETTLE_SEC     = 1.0    # Pause après arrivée en position caméra (vibrations) avant la photo
 # Orientation : si les noms de cases de l'image de debug ne collent pas au vrai plateau
 VISION_FLIP_FILES = False      # inverse a↔h
-VISION_FLIP_RANKS = False      # inverse 1↔8
+VISION_FLIP_RANKS = True       # inverse 1↔8 (caméra montée : rangée 1 en bas de l'image)
 VISION_SWAP_AXES  = False      # échange colonnes et rangées (caméra tournée de 90°)
 
 # Variables utilisées par CameraStream dans app.py
