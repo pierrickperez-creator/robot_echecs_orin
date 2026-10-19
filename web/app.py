@@ -306,6 +306,11 @@ def home_axes():
     log_gcode(f"Homing Z : capteur au-dessus de {ref} (aimant X{mx:.1f} Y{my:.1f})")
     z = last_position['z']
     move_xyz(mx, my, z)
+    # Hauteur réelle inconnue : on se donne une coordonnée haute pour que la limite logicielle
+    # de Marlin (pas de Z négatif) n'arrête pas la descente avant le contact.
+    z = config.Z_PROBE_MAX_MM + 30
+    send_gcode_raw(f"G92 Z{z:.2f}")
+    last_position['z'] = z
     if z_endstop_triggered():
         log_gcode("⚠️ Capteur déjà enfoncé avant la descente : arrêt.")
         status_msg = "⚠️ Capteur de plateau déjà enfoncé : remontez la tête à la main."
@@ -325,7 +330,11 @@ def home_axes():
     if not descend(config.Z_PROBE_STEP_MM, config.Z_PROBE_MAX_MM):
         log_gcode("⚠️ Capteur jamais déclenché : pièce de référence absente ou mal placée ?")
         status_msg = f"⚠️ Homing Z raté : la pièce {ref} est-elle bien en place ?"
-        move_xyz(mx, my, z + 30)
+        send_gcode_raw("G91")
+        send_gcode_raw(f"G0 Z30 F{config.FEED_Z}")   # remontée relative, jamais bloquée
+        send_gcode_raw("G90")
+        send_gcode_raw("M400")
+        last_position['z'] = z + 30
         return False
     # Second passage fin : remonte un peu puis redescend par petits pas
     z += 2 * config.Z_PROBE_STEP_MM
