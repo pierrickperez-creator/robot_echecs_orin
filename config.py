@@ -76,14 +76,14 @@ CAMERA_WIDTH  = 640           # Résolution en sortie de la caméra SQ11
 CAMERA_HEIGHT = 480
 # Réglages appliqués à l'ouverture (v4l2-ctl). Exposition et balance des blancs FIXES :
 # en automatique, l'image change d'une photo à l'autre et fausse la comparaison des coups.
-# Exposition 300 réglée sur la machine (en auto, 26 % de l'image était saturée en blanc).
+# Réglée sur la machine sous LED (en auto, 26 % de l'image était saturée en blanc au soleil).
 CAMERA_V4L2_CONTROLS = {
     "auto_exposure": 1,                # 1 = manuel
-    "exposure_time_absolute": 300,
+    "exposure_time_absolute": 2500,     # volets fermés + bandeau LED (300 en plein soleil)
     "white_balance_automatic": 0,
-    "white_balance_temperature": 4600,
+    "white_balance_temperature": 3500,  # meilleur écart bois / plastique sous les LED
 }
-VISION_PIECE_CHROMA_MAX = 20  # Socles : pixel "pièce" si peu coloré (le bois est jaune-orangé)
+VISION_PIECE_CHROMA_MAX = 20  # Socles : seuil par défaut (recalculé à chaque apprentissage)
 BOARD_PX      = 400
 BOARD_CORNERS = None          # Sera calibré avec les 4 dames noires
 

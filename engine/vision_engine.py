@@ -290,12 +290,48 @@ class VisionEngine:
         return cv2.warpPerspective(frame, m, (10 * self.HI_CELL, 10 * self.HI_CELL))
 
     @staticmethod
-    def _piece_mask(warped):
-        """Pièces (blanches comme noires) = peu colorées ; le bois est jaune-orangé."""
+    def _chroma(warped):
         lab = cv2.cvtColor(cv2.GaussianBlur(warped, (5, 5), 0), cv2.COLOR_BGR2LAB).astype(np.float32)
-        chroma = np.hypot(lab[..., 1] - 128, lab[..., 2] - 128)
-        mask = (chroma < getattr(config, "VISION_PIECE_CHROMA_MAX", 20)).astype(np.uint8) * 255
-        return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)), lab[..., 0]
+        return np.hypot(lab[..., 1] - 128, lab[..., 2] - 128), lab[..., 0]
+
+    def _piece_mask(self, warped, thr=None, dark_thr=None):
+        """
+        Pièces blanches = peu colorées (le bois est jaune-orangé) ;
+        pièces noires = très sombres (leur couleur mesurée est trop bruitée pour le seuil de chroma).
+        """
+        db = getattr(self, "piece_db", None) or {}
+        if thr is None:
+            thr = db.get("chroma_thr", getattr(config, "VISION_PIECE_CHROMA_MAX", 20))
+        if dark_thr is None:
+            dark_thr = db.get("dark_thr", 60)
+        chroma, lum = self._chroma(warped)
+        mask = ((chroma < thr) | (lum < dark_thr)).astype(np.uint8) * 255
+        return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)), lum
+
+    def _auto_chroma_threshold(self, warped, board):
+        """Seuil entre la couleur du bois (cases vides) et celle des pièces (cases occupées)."""
+        chroma, _ = self._chroma(warped)
+        n, k = self.HI_CELL, self.HI_CELL // 4
+        def centre(sq):
+            c, r = self.square_to_cell(sq)
+            return chroma[r * n + n // 2 - k:r * n + n // 2 + k, c * n + n // 2 - k:c * n + n // 2 + k].ravel()
+        empty = np.concatenate([centre(sq) for sq in range(64) if board.piece_at(sq) is None])
+        full = np.concatenate([centre(sq) for sq in board.piece_map()])
+        wood, piece = np.percentile(empty, 10), np.percentile(full, 75)
+        return float((wood + piece) / 2), float(wood), float(piece)
+
+    def _auto_dark_threshold(self, warped, board):
+        """Seuil de luminosité entre les pièces noires et le bois le plus sombre."""
+        _, lum = self._chroma(warped)
+        n, k = self.HI_CELL, self.HI_CELL // 4
+        def centre(sq):
+            c, r = self.square_to_cell(sq)
+            return lum[r * n + n // 2 - k:r * n + n // 2 + k, c * n + n // 2 - k:c * n + n // 2 + k].ravel()
+        empty = np.concatenate([centre(sq) for sq in range(64) if board.piece_at(sq) is None])
+        black = [centre(sq) for sq, p in board.piece_map().items() if not p.color]
+        if not black:
+            return 60.0
+        return float((np.percentile(empty, 5) + np.percentile(np.concatenate(black), 75)) / 2)
 
     def _base_features(self, mask, lum, square):
         """Descripteurs de la forme du socle posé sur `square` (None si case vide)."""
@@ -345,7 +381,9 @@ class VisionEngine:
         """
         import json
         warped = self._warp_hi(frame)
-        mask, lum = self._piece_mask(warped)
+        thr, wood_c, piece_c = self._auto_chroma_threshold(warped, board)
+        dark_thr = self._auto_dark_threshold(warped, board)
+        mask, lum = self._piece_mask(warped, thr, dark_thr)
         samples, missing = [], []
         for sq, piece in board.piece_map().items():
             f = self._base_features(mask, lum, sq)
@@ -356,7 +394,7 @@ class VisionEngine:
         dark = [s["lum"] for s in samples if s["piece"].islower()]
         light = [s["lum"] for s in samples if s["piece"].isupper()]
         lum_split = (np.mean(dark) + np.mean(light)) / 2 if dark and light else 110.0
-        self.piece_db = {"samples": samples, "lum_split": float(lum_split),
+        self.piece_db = {"samples": samples, "lum_split": float(lum_split), "chroma_thr": thr, "dark_thr": dark_thr,
                          "date": time.strftime("%Y-%m-%d %H:%M:%S")}
         with open(self.PIECE_FILE, "w") as fh:
             json.dump(self.piece_db, fh, indent=1)
@@ -375,6 +413,7 @@ class VisionEngine:
                 errors.append(f"{chess.square_name(s['square'])}:{s['piece']}→{guess}")
         n = max(len(samples), 1)
         return {"learned": len(samples), "missing": missing,
+                "chroma": {"bois": round(wood_c, 1), "pièces": round(piece_c, 1), "seuil": round(thr, 1)},
                 "type_accuracy": round(100 * ok_type / n), "full_accuracy": round(100 * ok_full / n),
                 "errors": errors}
 
