@@ -192,7 +192,14 @@ def read_marlin_position():
 
 def home_axes():
     """G28 puis lecture de la position réelle. Retourne True si Marlin a confirmé."""
+    global status_msg
+    t0 = time.time()
     ok = send_gcode_raw("G28")
+    duree = time.time() - t0
+    if ok and duree > 75 and not config.SIMULATION_MODE:
+        # Moteurs sans courant : Marlin envoie les pas jusqu'au bout de la course sans toucher de butée
+        log_gcode(f"⚠️ Homing anormalement long ({duree:.0f} s) : alimentation de l'imprimante allumée ?")
+        status_msg = "⚠️ Les moteurs ne semblent pas alimentés : vérifiez l'interrupteur de l'imprimante."
     if ok:
         pos = read_marlin_position()
         log_gcode(f"Origine faite : X{pos['x']} Y{pos['y']} Z{pos['z']}")
@@ -200,19 +207,19 @@ def home_axes():
 
 _magnet_on_since = None   # timestamp d'activation (watchdog anti-surchauffe)
 
+def magnet_gcode(state):
+    """Commande G-code du relais de l'aimant (config.MAGNET_MODE)."""
+    if getattr(config, 'MAGNET_MODE', 'pin') == 'servo':
+        val = config.MAGNET_SERVO_ON if state else config.MAGNET_SERVO_OFF
+        return f"M280 P{config.MAGNET_SERVO_IDX} S{val}"
+    return f"M42 P{config.MAGNET_PIN} S{255 if state else 0}"
+
+
 def magnet(state):
-    """
-    Active ou désactive le relais KS0055 branché sur le connecteur servo (D11).
-    Commande servo Marlin : M280 P<idx> S<valeur>.
-    """
+    """Active ou désactive le relais KS0055 de l'électroaimant (broche D11)."""
     global _magnet_on_since
-    idx = config.MAGNET_SERVO_IDX
-    if state:
-        send_gcode_raw(f"M280 P{idx} S{config.MAGNET_SERVO_ON}")
-        _magnet_on_since = time.time()
-    else:
-        send_gcode_raw(f"M280 P{idx} S{config.MAGNET_SERVO_OFF}")
-        _magnet_on_since = None
+    send_gcode_raw(magnet_gcode(state))
+    _magnet_on_since = time.time() if state else None
 
 def magnet_watchdog():
     """Thread : coupe l'aimant automatiquement si resté actif trop longtemps."""
@@ -1338,8 +1345,17 @@ def api_magnet():
 @app.route('/cmd/home', methods=['POST'])
 def cmd_home():
     global last_position
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Robot déjà en mouvement (homing en cours ?)"}), 409
     log_gcode("MOTEURS : Homing G28")
-    threading.Thread(target=home_axes, daemon=True).start()
+
+    def run():
+        try:
+            if not home_axes():
+                log_gcode("⚠️ Homing non confirmé par Marlin")
+        finally:
+            robot_busy.release()
+    threading.Thread(target=run, daemon=True).start()
     return jsonify({"status": "ok"})
 
 
@@ -1436,7 +1452,7 @@ def emergency_stop():
     # Écriture directe, sans attendre le verrou : un G28/M400 peut l'occuper longtemps
     if ser and not config.SIMULATION_MODE:
         try:
-            ser.write(f"M410\nM280 P{config.MAGNET_SERVO_IDX} S{config.MAGNET_SERVO_OFF}\n".encode())
+            ser.write(f"M410\n{magnet_gcode(False)}\n".encode())
         except Exception as e:
             log_gcode(f"Erreur arrêt d'urgence : {e}")
     log_gcode("!!! ARRÊT D'URGENCE !!!")

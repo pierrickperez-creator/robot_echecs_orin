@@ -131,8 +131,10 @@ STOCKFISH_MOVE_TIME = 1.0
 # --- MARLIN BOARD PINS ---
 # Ces pins se trouvent sur la carte MKS et non sur le Jetson Orin.
 # Le Jetson Orin utilise uniquement ses GPIO pour l'écran tactile.
-# Relais sur connecteur servo D11 via module KS0055, contrôlé par M280 (commande servo Marlin).
-MAGNET_PIN = 11           # gardé pour référence, non utilisé par M280
+# Relais KS0055 sur la broche D11. Testé sur la machine : le relais claque avec M42 P11,
+# pas avec M280 (sortie servo inactive dans le firmware Dagoma).
+MAGNET_MODE = "pin"       # "pin" = M42 P<MAGNET_PIN> S255/S0 ; "servo" = M280 P<idx> S<on/off>
+MAGNET_PIN = 11
 MAGNET_SERVO_IDX = 0      # Index servo Marlin : 0 = premier servo (D11 sur RAMPS/MKS)
 MAGNET_SERVO_ON  = 180    # M280 P0 S180 → relais ON
 MAGNET_SERVO_OFF = 0      # M280 P0 S0   → relais OFF
