@@ -289,6 +289,15 @@ Cette page permet de contrôler manuellement les moteurs du robot sans jouer aux
 
 **Réglage Z de prise** : Ajuste la hauteur à laquelle l'aimant attrape les pièces.
 
+**🎯 Calibration des prises** (obligatoire avant toute partie, le robot refuse de bouger les pièces sans elle) :
+1. **🏠 HOME G28**, puis cochez **Pas fin** (les boutons ±1 avancent de 0,2 mm)
+2. **Aller a1** : centrez l'aimant au-dessus du centre de a1 avec X / Y, puis **📌 a1 ici**. Idem pour **h1** et **a8**
+3. Au-dessus d'une case vide, descendez en Z jusqu'à ce que l'aimant touche le plateau, puis **📌 Surface du plateau ici**
+4. Pour chaque type de pièce : placez l'aimant au-dessus de la pièce, descendez jusqu'à toucher la vis de sa tête, puis **📌 Pion / Cavalier / Fou / Tour / Dame / Roi**
+5. **Essai** : choisissez la pièce et la case, **⬆ Soulever / reposer**, puis **➜ Déplacer**
+
+Le robot en déduit la position de toutes les cases et des cimetières, et la hauteur de transport (au-dessus de la plus haute pièce). Tout est enregistré dans `board_calibration.json`.
+
 **Caméra** : **🎯 CALIBRER CAMÉRA** et **📸 PHOTO RÉFÉRENCE** (voir « Calibrer la caméra » au chapitre 6), avec l'image analysée par le robot.
 
 ---

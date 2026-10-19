@@ -140,8 +140,7 @@ def startup_sequence():
     with robot_busy:
         status_msg = "Démarrage : mise en position du robot..."
         log_gcode("DÉMARRAGE : Homing G28...")
-        if send_gcode_raw("G28"):
-            last_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        if home_axes():
             move_to_vision_position()
             capture_reference()
             status_msg = "Robot prêt. Jouez votre coup puis appuyez sur J'AI JOUÉ."
@@ -155,14 +154,49 @@ def move_to_vision_position():
     move_xyz(config.VISION_X, config.VISION_Y, config.Z_VISION)
 
 
-def move_xyz(x, y, z):
+def move_xyz(x, y, z, feed=None):
     """Déplacement absolu avec attente de fin de mouvement."""
     global last_position
     last_position = {'x': round(x, 2), 'y': round(y, 2), 'z': round(z, 2)}
     send_gcode_raw("G90")
-    cmd = f"G0 X{x:.2f} Y{y:.2f} Z{z:.2f} F{config.FEED_TRAVEL}"
+    cmd = f"G0 X{x:.2f} Y{y:.2f} Z{z:.2f} F{feed or config.FEED_TRAVEL}"
     send_gcode_raw(cmd)
     send_gcode_raw("M400")
+
+
+def read_marlin_position():
+    """
+    Lit la position réelle (M114) et met à jour last_position.
+    Indispensable après un homing : la DiscoEasy fait son origine Y en butée MAX,
+    la tête n'est donc pas en Y0 après G28.
+    """
+    global last_position
+    if config.SIMULATION_MODE or not ser:
+        return last_position
+    import re
+    with serial_lock:
+        try:
+            ser.write(b"M114\n")
+            deadline = time.time() + 3
+            while time.time() < deadline:
+                line = ser.readline().decode(errors='ignore')
+                m = re.search(r"X:\s*(-?[\d.]+)\s*Y:\s*(-?[\d.]+)\s*Z:\s*(-?[\d.]+)", line)
+                if m:
+                    last_position = {'x': float(m.group(1)), 'y': float(m.group(2)), 'z': float(m.group(3))}
+                if line.strip().startswith("ok") and m is None and last_position:
+                    break
+        except Exception as e:
+            log_gcode(f"Lecture position impossible : {e}")
+    return last_position
+
+
+def home_axes():
+    """G28 puis lecture de la position réelle. Retourne True si Marlin a confirmé."""
+    ok = send_gcode_raw("G28")
+    if ok:
+        pos = read_marlin_position()
+        log_gcode(f"Origine faite : X{pos['x']} Y{pos['y']} Z{pos['z']}")
+    return ok
 
 _magnet_on_since = None   # timestamp d'activation (watchdog anti-surchauffe)
 
@@ -189,13 +223,92 @@ def magnet_watchdog():
             log_gcode(f"⚠ RELAIS coupé automatiquement (>{max_on}s) — protection thermique")
             magnet(False)
 
+# ── Calibration des prises (board_calibration.json) ──────────────────────────
+PICK_CALIB_FILE = os.path.join(parent_dir, "board_calibration.json")
+PIECE_TYPES = ['p', 'n', 'b', 'r', 'q', 'k']
+PIECE_NAMES = {'p': 'Pion', 'n': 'Cavalier', 'b': 'Fou', 'r': 'Tour', 'q': 'Dame', 'k': 'Roi'}
+
+
+def load_pick_calib():
+    import json
+    try:
+        with open(PICK_CALIB_FILE) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"⚠️ Calibration des prises illisible : {e}")
+        return {}
+
+
+def save_pick_calib():
+    import json
+    with open(PICK_CALIB_FILE, "w") as f:
+        json.dump(pick_calib, f, indent=2)
+
+
+pick_calib = load_pick_calib()
+
+
+def pick_missing():
+    """Liste de ce qu'il reste à calibrer avant de pouvoir déplacer des pièces."""
+    missing = [p for p in ('a1', 'h1', 'a8') if p not in pick_calib]
+    if 'z_surface' not in pick_calib:
+        missing.append('surface')
+    missing += [PIECE_NAMES[t] for t in PIECE_TYPES if t not in pick_calib.get('pick_z', {})]
+    return missing
+
+
+def pick_ready():
+    return config.SIMULATION_MODE or not pick_missing()
+
+
+def grid_to_xy(c, r):
+    """
+    Cellule (colonne, rangée) de la grille 10x10 → position de l'aimant en mm.
+    a1 = (1, 1). Avec la calibration, transformation affine définie par a1, h1, a8
+    (corrige décalage, échelle et léger biais du plateau) ; sinon valeurs théoriques.
+    """
+    if all(k in pick_calib for k in ('a1', 'h1', 'a8')):
+        a1, h1, a8 = pick_calib['a1'], pick_calib['h1'], pick_calib['a8']
+        ux, uy = (h1[0] - a1[0]) / 7.0, (h1[1] - a1[1]) / 7.0   # une colonne
+        vx, vy = (a8[0] - a1[0]) / 7.0, (a8[1] - a1[1]) / 7.0   # une rangée
+        return (a1[0] + (c - 1) * ux + (r - 1) * vx,
+                a1[1] + (c - 1) * uy + (r - 1) * vy)
+    return config.grid_xy(c, r)
+
+
 def calculate_xy(square_name):
     """Calcule les coordonnées mm depuis une case (ex: 'e2')."""
     col = ord(square_name[0]) - ord('a')
     row = int(square_name[1]) - 1
-    x = config.BOARD_OFFSET_X + (col * config.SQUARE_SIZE_MM) + (config.SQUARE_SIZE_MM / 2)
-    y = config.BOARD_OFFSET_Y + (row * config.SQUARE_SIZE_MM) + (config.SQUARE_SIZE_MM / 2)
-    return x, y
+    return grid_to_xy(col + 1, row + 1)
+
+
+def graveyard_xy(color_white, idx):
+    cells = config.WHITE_GRAVEYARD_CELLS if color_white else config.BLACK_GRAVEYARD_CELLS
+    return grid_to_xy(*cells[min(idx, len(cells) - 1)])
+
+
+def reserve_xy(color_white, idx):
+    cells = config.WHITE_QUEEN_RESERVE_CELLS if color_white else config.BLACK_QUEEN_RESERVE_CELLS
+    return grid_to_xy(*cells[min(idx, len(cells) - 1)])
+
+
+def piece_height(ptype):
+    """Hauteur de la pièce au-dessus du plateau (mm), d'après la calibration."""
+    pz = pick_calib.get('pick_z', {})
+    if ptype in pz and 'z_surface' in pick_calib:
+        return pz[ptype] - pick_calib['z_surface']
+    return None
+
+
+def travel_z():
+    """Hauteur des trajets à vide : au-dessus de la plus haute pièce."""
+    heights = [h for h in (piece_height(t) for t in PIECE_TYPES) if h is not None]
+    if heights and 'z_surface' in pick_calib:
+        return pick_calib['z_surface'] + max(heights) + config.PICK_CLEARANCE_MM
+    return config.PICK_GOTO_Z
 
 # =============================================================================
 # GESTION CAMÉRA (JETSON CSI / USB) — ROBUSTE
@@ -403,29 +516,51 @@ sim_lock  = threading.Lock()
 # ACTIONS PHYSIQUES (MOUVEMENTS DE PIÈCES)
 # =============================================================================
 
-def move_piece(fx, fy, tx, ty):
+class PickNotCalibrated(RuntimeError):
+    pass
+
+
+def move_piece(fx, fy, tx, ty, ptype='k'):
     """
-    Déplace physiquement une pièce de (fx,fy) à (tx,ty) avec l'aimant.
-    Les trajets horizontaux se font toujours en hauteur (Z_TRAVEL_REL) :
-    la tête ne descend qu'à la verticale de la case visée, pour ne jamais
-    accrocher les autres pièces.
+    Déplace physiquement une pièce de type `ptype` ('p','n','b','r','q','k')
+    de (fx,fy) à (tx,ty). L'aimant se pose sur la tête de la pièce (hauteur
+    calibrée pour chaque type) ; pendant le transport, le bas de la pièce passe
+    au-dessus de la plus haute pièce du plateau.
     """
-    lift_to_travel()
-    move_xyz(fx, fy, config.Z_TRAVEL_REL)
-    move_xyz(fx, fy, config.Z_BOARD)
+    if not pick_ready():
+        raise PickNotCalibrated("Prises non calibrées : " + ", ".join(pick_missing()))
+    ptype = ptype.lower()
+    if config.SIMULATION_MODE and piece_height(ptype) is None:
+        z_pick, z_travel, z_carry = config.Z_BOARD, config.Z_TRAVEL_REL, config.Z_TRAVEL_REL
+    else:
+        z_pick = pick_calib['pick_z'][ptype]
+        z_travel = travel_z()
+        z_carry = z_travel + piece_height(ptype)
+    z_near = z_pick + config.PICK_APPROACH_MM
+
+    lift_to(z_travel)
+    move_xyz(fx, fy, z_travel)
+    move_xyz(fx, fy, z_near)
+    move_xyz(fx, fy, z_pick, feed=config.FEED_APPROACH)
     magnet(True)
-    move_xyz(fx, fy, config.Z_PICK_REL)
-    move_xyz(tx, ty, config.Z_PICK_REL)
-    move_xyz(tx, ty, config.Z_BOARD)
+    send_gcode_raw(f"G4 P{config.MAGNET_DWELL_MS}")
+    move_xyz(fx, fy, z_carry)
+    move_xyz(tx, ty, z_carry)
+    move_xyz(tx, ty, z_near)
+    move_xyz(tx, ty, z_pick, feed=config.FEED_APPROACH)
     magnet(False)
-    move_xyz(tx, ty, config.Z_TRAVEL_REL)
+    send_gcode_raw(f"G4 P{config.MAGNET_DWELL_MS}")
+    move_xyz(tx, ty, z_travel)
+
+
+def lift_to(z):
+    """Remonte à la hauteur z (si plus bas) sans bouger en XY."""
+    if last_position['z'] < z:
+        move_xyz(last_position['x'], last_position['y'], z)
 
 
 def lift_to_travel():
-    """Remonte à la hauteur de déplacement sans bouger en XY."""
-    x, y = last_position['x'], last_position['y']
-    z = max(last_position['z'], config.Z_TRAVEL_REL)
-    move_xyz(x, y, z)
+    lift_to(travel_z())
 
 
 def graveyard_contents(board):
@@ -493,33 +628,36 @@ def perform_physical_move(board_before, move):
     w_types, b_types = graveyard_contents(board)
     w_used = {chess_lib.WHITE: len(w_types), chess_lib.BLACK: len(b_types)}
 
-    def to_graveyard(x, y, color):
-        graveyard = config.WHITE_GRAVEYARD if color == chess_lib.WHITE else config.BLACK_GRAVEYARD
-        gx, gy = graveyard[min(w_used[color], len(graveyard) - 1)]
-        move_piece(x, y, gx, gy)
+    def to_graveyard(x, y, color, ptype):
+        gx, gy = graveyard_xy(color == chess_lib.WHITE, w_used[color])
+        move_piece(x, y, gx, gy, ptype)
         w_used[color] += 1
+
+    mover = board.piece_at(move.from_square)
+    mover_t = chess_lib.piece_symbol(mover.piece_type) if mover else 'k'
 
     # --- 1. Prise : la pièce capturée part au cimetière ---
     captured_piece = board.piece_at(move.to_square)
     if captured_piece is not None:
-        to_graveyard(dst_x, dst_y, captured_piece.color)
+        to_graveyard(dst_x, dst_y, captured_piece.color,
+                     chess_lib.piece_symbol(captured_piece.piece_type))
     elif board.is_en_passant(move):
         ep_x, ep_y = calculate_xy(dst_sq[0] + src_sq[1])  # pion pris : même rangée que la source
-        to_graveyard(ep_x, ep_y, not board.turn)
+        to_graveyard(ep_x, ep_y, not board.turn, 'p')
 
     # --- 2. Pièce principale (un pion promu part au cimetière, remplacé par une dame) ---
     if move.promotion:
-        to_graveyard(src_x, src_y, board.turn)
-        reserve = config.WHITE_QUEEN_RESERVE if board.turn == chess_lib.WHITE else config.BLACK_QUEEN_RESERVE
+        to_graveyard(src_x, src_y, board.turn, 'p')
+        reserve = config.WHITE_QUEEN_RESERVE_CELLS if board.turn == chess_lib.WHITE else config.BLACK_QUEEN_RESERVE_CELLS
         wq, bq = queens_used(board)
         used_idx = wq if board.turn == chess_lib.WHITE else bq
         if used_idx < len(reserve):
-            qx, qy = reserve[used_idx]
-            move_piece(qx, qy, dst_x, dst_y)
+            qx, qy = reserve_xy(board.turn == chess_lib.WHITE, used_idx)
+            move_piece(qx, qy, dst_x, dst_y, 'q')
         else:
             log_gcode(f"⚠ Plus de dame en réserve : posez-la à la main sur {dst_sq}")
     else:
-        move_piece(src_x, src_y, dst_x, dst_y)
+        move_piece(src_x, src_y, dst_x, dst_y, mover_t)
 
     # --- 3. Roque : déplacer la tour ---
     if board.is_castling(move):
@@ -528,7 +666,7 @@ def perform_physical_move(board_before, move):
         rook_dst = ('f' if king_side else 'd') + dst_sq[1]
         rx1, ry1 = calculate_xy(rook_src)
         rx2, ry2 = calculate_xy(rook_dst)
-        move_piece(rx1, ry1, rx2, ry2)
+        move_piece(rx1, ry1, rx2, ry2, 'r')
 
 
 robot_busy = threading.Lock()   # un seul coup robot à la fois (double appui écran)
@@ -538,7 +676,12 @@ def execute_move_sequence(board_before, move):
     global status_msg
     try:
         status_msg = f"Déplacement {move.uci()}..."
-        perform_physical_move(board_before, move)
+        try:
+            perform_physical_move(board_before, move)
+        except PickNotCalibrated as e:
+            log_gcode(f"⛔ {e}")
+            status_msg = f"Robot : {move.uci()} — déplacez la pièce à la main ({e})"
+            return
         log_gcode(f"ROBOT JOUE : {move.uci()}")
         move_to_vision_position()
         capture_reference()
@@ -600,17 +743,17 @@ def reset_board_physically():
         px, py = calculate_xy(sq_name)
 
         if piece.color == chess_lib.WHITE:
-            slot = min(w_park_idx, len(config.WHITE_GRAVEYARD) - 1)
-            gx, gy = config.WHITE_GRAVEYARD[slot]
+            slot = min(w_park_idx, len(config.WHITE_GRAVEYARD_CELLS) - 1)
+            gx, gy = graveyard_xy(True, slot)
             log_gcode(f"  Gare {sq_name} (blanc) → slot W{slot}")
-            move_piece(px, py, gx, gy)
+            move_piece(px, py, gx, gy, piece.symbol())
             park_w.append((slot, piece.piece_type))
             w_park_idx += 1
         else:
-            slot = min(b_park_idx, len(config.BLACK_GRAVEYARD) - 1)
-            gx, gy = config.BLACK_GRAVEYARD[slot]
+            slot = min(b_park_idx, len(config.BLACK_GRAVEYARD_CELLS) - 1)
+            gx, gy = graveyard_xy(False, slot)
             log_gcode(f"  Gare {sq_name} (noir) → slot B{slot}")
-            move_piece(px, py, gx, gy)
+            move_piece(px, py, gx, gy, piece.symbol())
             park_b.append((slot, piece.piece_type))
             b_park_idx += 1
 
@@ -635,10 +778,10 @@ def reset_board_physically():
                 log_gcode(f"  ⚠ Manque blanc {chess_lib.piece_name(pt)} pour {sq_name}")
                 continue
             slot = avail_w[pt].pop(0)
-            gx, gy = config.WHITE_GRAVEYARD[slot]
+            gx, gy = graveyard_xy(True, slot)
             tx, ty = calculate_xy(sq_name)
             log_gcode(f"  W{slot} → {sq_name} ({chess_lib.piece_name(pt)})")
-            move_piece(gx, gy, tx, ty)
+            move_piece(gx, gy, tx, ty, chess_lib.piece_symbol(pt))
 
     for pt, squares in BLACK_HOME.items():
         for sq_name in squares:
@@ -646,10 +789,10 @@ def reset_board_physically():
                 log_gcode(f"  ⚠ Manque noir {chess_lib.piece_name(pt)} pour {sq_name}")
                 continue
             slot = avail_b[pt].pop(0)
-            gx, gy = config.BLACK_GRAVEYARD[slot]
+            gx, gy = graveyard_xy(False, slot)
             tx, ty = calculate_xy(sq_name)
             log_gcode(f"  B{slot} → {sq_name} ({chess_lib.piece_name(pt)})")
-            move_piece(gx, gy, tx, ty)
+            move_piece(gx, gy, tx, ty, chess_lib.piece_symbol(pt))
 
     log_gcode("═══ PLATEAU RANGÉ ═══")
     game_engine.reset()   # les pièces sont en position initiale : la mémoire aussi
@@ -659,8 +802,12 @@ def reset_board_physically():
 
 
 def _reset_board_thread():
+    global status_msg
     try:
         reset_board_physically()
+    except PickNotCalibrated as e:
+        log_gcode(f"⛔ {e}")
+        status_msg = f"Rangement impossible : {e}"
     finally:
         robot_busy.release()
 
@@ -802,6 +949,7 @@ def api_status():
         'clock_minutes': round(game_engine.initial_time / 60, 1),
         'moves': _build_move_history(),
         'robot_busy': robot_busy.locked(),
+        'pick_ready': pick_ready(),
         'vision_ready': vision_ready(),
     })
 
@@ -970,6 +1118,9 @@ def api_bot_move():
     robot_turn = (game_engine.board.turn == chess.WHITE) != config.HUMAN_PLAYS_WHITE
     if not robot_turn or game_engine.is_game_over():
         return jsonify({"status": "error", "msg": "Ce n'est pas au robot de jouer."}), 400
+    if not pick_ready():
+        return jsonify({"status": "error",
+                        "msg": "Calibrez d'abord les prises (page Manuel) : " + ", ".join(pick_missing())}), 400
     if not robot_busy.acquire(blocking=False):
         return jsonify({"status": "busy", "msg": "Le robot est déjà en train de jouer."}), 409
     move = start_robot_reply()
@@ -1010,6 +1161,9 @@ def api_validate_move():
     human_turn = (game_engine.board.turn == chess.WHITE) == config.HUMAN_PLAYS_WHITE
     if not human_turn or game_engine.is_game_over():
         return jsonify({"status": "error", "msg": "Ce n'est pas à vous de jouer."}), 400
+    if not pick_ready():
+        return jsonify({"status": "error",
+                        "msg": "Calibrez d'abord les prises (page Manuel) : " + ", ".join(pick_missing())}), 400
     if not robot_busy.acquire(blocking=False):
         return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
 
@@ -1177,8 +1331,7 @@ def api_magnet():
 def cmd_home():
     global last_position
     log_gcode("MOTEURS : Homing G28")
-    threading.Thread(target=send_gcode_raw, args=("G28",), daemon=True).start()
-    last_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+    threading.Thread(target=home_axes, daemon=True).start()
     return jsonify({"status": "ok"})
 
 
@@ -1226,6 +1379,15 @@ def cmd_physical_move():
     """
     src = request.json.get('src', '')
     dst = request.json.get('dst', '')
+    # Type de pièce : donné par la page, sinon celle de la partie sur la case, sinon le roi (le plus haut)
+    ptype = (request.json.get('piece') or '').lower()
+    if not ptype and len(src) == 2:
+        try:
+            p_ = game_engine.board.piece_at(chess.parse_square(src))
+            ptype = p_.symbol().lower() if p_ else ''
+        except ValueError:
+            pass
+    ptype = ptype if ptype in PIECE_TYPES else 'k'
 
     def resolve_xy(loc):
         """Résout la position XY d'un slot quelconque."""
@@ -1233,27 +1395,28 @@ def cmd_physical_move():
             return calculate_xy(loc)
         # Cimetière blanc
         if loc.startswith('wg'):
-            idx = int(loc[2:])
-            return config.WHITE_GRAVEYARD[idx % len(config.WHITE_GRAVEYARD)]
+            return graveyard_xy(True, int(loc[2:]) % len(config.WHITE_GRAVEYARD_CELLS))
         # Cimetière noir
         if loc.startswith('bg'):
-            idx = int(loc[2:])
-            return config.BLACK_GRAVEYARD[idx % len(config.BLACK_GRAVEYARD)]
+            return graveyard_xy(False, int(loc[2:]) % len(config.BLACK_GRAVEYARD_CELLS))
         # Réserve Dame blanche
         if loc.startswith('wq'):
-            idx = int(loc[2:])
-            return config.WHITE_QUEEN_RESERVE[idx % len(config.WHITE_QUEEN_RESERVE)]
+            return reserve_xy(True, int(loc[2:]))
         # Réserve Dame noire
         if loc.startswith('bq'):
-            idx = int(loc[2:])
-            return config.BLACK_QUEEN_RESERVE[idx % len(config.BLACK_QUEEN_RESERVE)]
+            return reserve_xy(False, int(loc[2:]))
         raise ValueError(f"Slot inconnu : {loc}")
 
     try:
         sx, sy = resolve_xy(src)
         dx, dy = resolve_xy(dst)
-        move_piece(sx, sy, dx, dy)
-        log_gcode(f"MOUVEMENT MANUEL : {src} → {dst}")
+        if not robot_busy.acquire(blocking=False):
+            return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+        try:
+            move_piece(sx, sy, dx, dy, ptype)
+        finally:
+            robot_busy.release()
+        log_gcode(f"MOUVEMENT MANUEL : {src} → {dst} ({PIECE_NAMES[ptype]})")
         return jsonify({"status": "ok"})
     except Exception as e:
         log_gcode(f"ERREUR MOUVEMENT MANUEL : {e}")
@@ -1293,11 +1456,12 @@ def api_goto_grid():
     """Déplace le robot vers une case de la grille 10×10 (c, r)."""
     c = int(request.json.get('c', 0))
     r = int(request.json.get('r', 0))
-    x = c * config.SQUARE_SIZE_MM + config.SQUARE_SIZE_MM / 2
-    y = r * config.SQUARE_SIZE_MM + config.SQUARE_SIZE_MM / 2
-    move_xyz(x, y, config.Z_TRAVEL_REL)
-    log_gcode(f"GOTO c={c} r={r} → X{x:.1f} Y{y:.1f} Z{config.Z_TRAVEL_REL}")
-    return jsonify({"status": "ok", "x": x, "y": y, "z": config.Z_TRAVEL_REL})
+    x, y = grid_to_xy(c, r)
+    z = max(last_position['z'], travel_z())
+    lift_to(z)
+    move_xyz(x, y, z)
+    log_gcode(f"GOTO c={c} r={r} → X{x:.1f} Y{y:.1f} Z{z:.1f}")
+    return jsonify({"status": "ok", "x": x, "y": y, "z": z})
 
 
 @app.route('/api/goto_z_pick', methods=['POST'])
@@ -1329,6 +1493,82 @@ def api_get_config():
         'z_travel': config.Z_TRAVEL_REL,
         'feed':     config.FEED_TRAVEL,
     })
+
+
+@app.route('/api/pick/status')
+def api_pick_status():
+    heights = {t: piece_height(t) for t in PIECE_TYPES}
+    return jsonify({
+        "calib": pick_calib, "missing": pick_missing(), "ready": pick_ready(),
+        "heights": {PIECE_NAMES[t]: (round(h, 1) if h is not None else None) for t, h in heights.items()},
+        "travel_z": round(travel_z(), 1), "position": last_position,
+    })
+
+
+@app.route('/api/pick/goto', methods=['POST'])
+def api_pick_goto():
+    """Place l'aimant au-dessus d'une case (estimation actuelle), à hauteur sûre."""
+    sq = (request.json.get('square') or 'a1').lower()
+    try:
+        x, y = calculate_xy(sq)
+    except Exception:
+        return jsonify({"status": "error", "msg": f"Case inconnue : {sq}"}), 400
+    z = max(last_position['z'], travel_z())
+    lift_to(z)
+    move_xyz(x, y, z)
+    return jsonify({"status": "ok", "x": round(x, 2), "y": round(y, 2), "z": round(z, 2)})
+
+
+@app.route('/api/pick/save', methods=['POST'])
+def api_pick_save():
+    """
+    Enregistre la position actuelle de l'aimant :
+      what = 'a1' | 'h1' | 'a8'  → centre de la case (X, Y)
+      what = 'surface'           → aimant posé sur le plateau (Z)
+      what = 'p','n','b','r','q','k' → aimant posé sur la tête de cette pièce (Z)
+    """
+    what = (request.json.get('what') or '').lower()
+    pos = read_marlin_position()
+    if what in ('a1', 'h1', 'a8'):
+        pick_calib[what] = [round(pos['x'], 2), round(pos['y'], 2)]
+        msg = f"{what} = X{pos['x']:.1f} Y{pos['y']:.1f}"
+    elif what == 'surface':
+        pick_calib['z_surface'] = round(pos['z'], 2)
+        msg = f"Surface du plateau = Z{pos['z']:.1f}"
+    elif what in PIECE_TYPES:
+        pick_calib.setdefault('pick_z', {})[what] = round(pos['z'], 2)
+        h = piece_height(what)
+        msg = f"{PIECE_NAMES[what]} : prise à Z{pos['z']:.1f}" + (f" (hauteur {h:.1f} mm)" if h is not None else "")
+    else:
+        return jsonify({"status": "error", "msg": f"Inconnu : {what}"}), 400
+    pick_calib['date'] = time.strftime("%Y-%m-%d %H:%M:%S")
+    save_pick_calib()
+    log_gcode(f"🎯 Calibration prise : {msg}")
+    return jsonify({"status": "ok", "msg": msg, "missing": pick_missing()})
+
+
+@app.route('/api/pick/test', methods=['POST'])
+def api_pick_test():
+    """Teste une prise : pièce `piece` de `src` vers `dst` (dst = src : soulève et repose)."""
+    src = (request.json.get('src') or '').lower()
+    dst = (request.json.get('dst') or src).lower()
+    ptype = (request.json.get('piece') or 'p').lower()
+    if ptype not in PIECE_TYPES:
+        return jsonify({"status": "error", "msg": "Type de pièce inconnu"}), 400
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+    try:
+        sx, sy = calculate_xy(src)
+        dx, dy = calculate_xy(dst)
+        move_piece(sx, sy, dx, dy, ptype)
+        log_gcode(f"🧪 Test prise {PIECE_NAMES[ptype]} {src} → {dst}")
+        return jsonify({"status": "ok", "msg": f"{PIECE_NAMES[ptype]} {src} → {dst} terminé"})
+    except PickNotCalibrated as e:
+        return jsonify({"status": "error", "msg": str(e)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "msg": f"Erreur : {e}"}), 400
+    finally:
+        robot_busy.release()
 
 
 @app.route('/api/position')
@@ -1614,7 +1854,10 @@ def api_leg_next_move():
             return jsonify({'status': 'done'})
         move = leg_moves[leg_index]
         uci  = move.uci()
-        execute_leg_move_sequence(uci)
+        try:
+            execute_leg_move_sequence(uci)
+        except PickNotCalibrated as e:
+            return jsonify({'status': 'error', 'msg': str(e)}), 400
         leg_board.push(move)
         leg_index += 1
         outcome = leg_board.outcome()

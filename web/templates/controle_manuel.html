@@ -201,6 +201,10 @@
             </div>
         </div>
 
+        <label style="font-size:12px;color:#aaa;display:flex;align-items:center;gap:6px;margin-top:4px">
+            <input type="checkbox" id="fine-step"> Pas fin : les boutons ±1 avancent de 0,2 mm
+        </label>
+
         <!-- Feed rate -->
         <div class="feed-row">
             <label>Vitesse</label>
@@ -209,13 +213,55 @@
             <span id="feed-display">33 mm/s</span>
         </div>
 
-        <!-- Z Référence prise -->
-        <div class="section-title">Hauteur de prise (Z_PICK_REL)</div>
-        <div class="z-ref-row">
-            <input type="number" id="z-pick-input" value="31" step="0.5" min="0" max="200">
-            <button class="btn-teal" style="flex:1" onclick="setZRef()">DÉFINIR Z PRISE</button>
+        <!-- Calibration des prises -->
+        <div class="section-title">🎯 Calibration des prises <span id="pick-state" style="font-weight:normal"></span></div>
+        <div style="font-size:10px;color:#888;margin-bottom:4px">
+            Faites d'abord HOME G28. Pour chaque étape : « Aller », centrez / descendez avec les flèches
+            (pas fin conseillé), puis « 📌 ».
         </div>
-        <button class="btn-blue" style="width:100%" onclick="gotoZPick()">⬇ DESCENDRE EN POSITION DE PRISE</button>
+        <div style="font-size:11px;color:#ccc;margin:4px 0 2px">1. Centre de l'aimant sur 3 cases (plateau vide à cet endroit)</div>
+        <div class="btn2">
+            <button class="btn-blue" onclick="pickGoto('a1')">Aller a1</button>
+            <button class="btn-teal" onclick="pickSave('a1')">📌 a1 ici</button>
+        </div>
+        <div class="btn2">
+            <button class="btn-blue" onclick="pickGoto('h1')">Aller h1</button>
+            <button class="btn-teal" onclick="pickSave('h1')">📌 h1 ici</button>
+        </div>
+        <div class="btn2">
+            <button class="btn-blue" onclick="pickGoto('a8')">Aller a8</button>
+            <button class="btn-teal" onclick="pickSave('a8')">📌 a8 ici</button>
+        </div>
+        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">2. Aimant posé sur le plateau (case vide)</div>
+        <button class="btn-teal" style="width:100%" onclick="pickSave('surface')">📌 Surface du plateau ici</button>
+        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">3. Aimant posé sur la tête de chaque type de pièce</div>
+        <div class="btn2">
+            <button class="btn-teal" onclick="pickSave('p')">📌 Pion</button>
+            <button class="btn-teal" onclick="pickSave('n')">📌 Cavalier</button>
+        </div>
+        <div class="btn2">
+            <button class="btn-teal" onclick="pickSave('b')">📌 Fou</button>
+            <button class="btn-teal" onclick="pickSave('r')">📌 Tour</button>
+        </div>
+        <div class="btn2">
+            <button class="btn-teal" onclick="pickSave('q')">📌 Dame</button>
+            <button class="btn-teal" onclick="pickSave('k')">📌 Roi</button>
+        </div>
+        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">4. Essai de prise réelle</div>
+        <div class="z-ref-row">
+            <select id="pick-piece" style="flex:1;padding:6px;background:#222;color:#eee;border:1px solid #444;border-radius:5px">
+                <option value="p">Pion</option><option value="n">Cavalier</option><option value="b">Fou</option>
+                <option value="r">Tour</option><option value="q">Dame</option><option value="k">Roi</option>
+            </select>
+            <input id="pick-src" value="e2" size="3" style="width:46px;padding:6px;background:#222;color:#eee;border:1px solid #444;border-radius:5px">
+            <span style="color:#888">→</span>
+            <input id="pick-dst" value="e4" size="3" style="width:46px;padding:6px;background:#222;color:#eee;border:1px solid #444;border-radius:5px">
+        </div>
+        <div class="btn2">
+            <button class="btn-purple" onclick="pickTest(true)">⬆ Soulever / reposer</button>
+            <button class="btn-purple" onclick="pickTest(false)">➜ Déplacer</button>
+        </div>
+        <div id="pick-msg" style="font-size:11px;color:#aaa;text-align:center;margin:4px 0"></div>
 
         <!-- Électroaimant -->
         <div class="section-title">Électroaimant <span id="magnet-status" style="font-size:11px;color:#e74c3c;font-weight:normal">⬤ OFF</span></div>
@@ -381,6 +427,7 @@ function gotoGrid(c, r) {
 
 // ─── Jogging ─────────────────────────────────────────────────────────────
 function jog(axis, dist) {
+    if (Math.abs(dist) === 1 && document.getElementById('fine-step').checked) dist = dist * 0.2;
     const mms  = parseInt(document.getElementById('feed-slider').value);
     const feed = mms * 60;  // mm/s → mm/min pour Marlin
     fetch('/cmd/move_manual', {
@@ -390,23 +437,6 @@ function jog(axis, dist) {
     }).then(r => r.json()).then(d => {
         if (d.x !== undefined) updatePosition(d.x, d.y, d.z);
     }).catch(() => {});
-}
-
-// ─── Z Référence ─────────────────────────────────────────────────────────
-function setZRef() {
-    const z = parseFloat(document.getElementById('z-pick-input').value);
-    fetch('/api/set_z_ref', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({z})
-    }).then(r => r.json()).then(d => {
-        document.getElementById('z-pick-input').value = d.z_pick;
-    });
-}
-
-function gotoZPick() {
-    fetch('/api/goto_z_pick', {method: 'POST'}).then(r => r.json())
-    .then(d => { if (d.z !== undefined) updatePosition(null, null, d.z); });
 }
 
 // ─── Aimant ───────────────────────────────────────────────────────────────
@@ -435,6 +465,41 @@ function doHome() {
     fetch('/cmd/home', {method: 'POST'});
     updatePosition(0, 0, 0);
 }
+
+// ─── Calibration des prises ───────────────────────────────────────────────
+function pickMsg(t) { document.getElementById('pick-msg').textContent = t; }
+function pickRefresh() {
+    fetch('/api/pick/status').then(r => r.json()).then(d => {
+        const el = document.getElementById('pick-state');
+        el.textContent = d.ready ? '✅ prête' : '⚠ manque : ' + d.missing.join(', ');
+        el.style.color = d.ready ? '#2ecc71' : '#e67e22';
+    }).catch(() => {});
+}
+function pickGoto(square) {
+    pickMsg('Déplacement au-dessus de ' + square + '...');
+    fetch('/api/pick/goto', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                             body: JSON.stringify({square})})
+    .then(r => r.json()).then(d => {
+        if (d.status === 'ok') { updatePosition(d.x, d.y, d.z); pickMsg('Au-dessus de ' + square + ' : centrez puis descendez.'); }
+        else pickMsg('❌ ' + d.msg);
+    });
+}
+function pickSave(what) {
+    fetch('/api/pick/save', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                             body: JSON.stringify({what})})
+    .then(r => r.json()).then(d => { pickMsg((d.status === 'ok' ? '✅ ' : '❌ ') + d.msg); pickRefresh(); });
+}
+function pickTest(sameSquare) {
+    const src = document.getElementById('pick-src').value.trim().toLowerCase();
+    const dst = sameSquare ? src : document.getElementById('pick-dst').value.trim().toLowerCase();
+    const piece = document.getElementById('pick-piece').value;
+    pickMsg('⏳ Essai en cours — ne touchez pas le plateau...');
+    fetch('/api/pick/test', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                             body: JSON.stringify({src, dst, piece})})
+    .then(r => r.json()).then(d => pickMsg((d.status === 'ok' ? '✅ ' : '❌ ') + d.msg))
+    .catch(() => pickMsg('❌ Serveur injoignable'));
+}
+pickRefresh();
 
 function visionCall(url, btn) {
     const msg = document.getElementById('vision-msg');
@@ -515,11 +580,6 @@ function pollStatus() {
         updatePosition(d.x, d.y, d.z);
     }).catch(() => {});
 }
-
-// ─── Charger la config initiale ───────────────────────────────────────────
-fetch('/api/get_config').then(r => r.json()).then(d => {
-    document.getElementById('z-pick-input').value = d.z_pick;
-});
 
 // ─── Démarrage ────────────────────────────────────────────────────────────
 setInterval(pollLog, 1000);

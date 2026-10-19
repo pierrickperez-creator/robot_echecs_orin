@@ -52,22 +52,39 @@ FEED_Z         = 1000.0
 def grid_xy(c, r):
     return (c * SQUARE_SIZE_MM + SQUARE_SIZE_MM/2, r * SQUARE_SIZE_MM + SQUARE_SIZE_MM/2)
 
-BLACK_GRAVEYARD = []
-WHITE_GRAVEYARD = []
+# Emplacements exprimés en cellules (colonne, rangée) de la grille 10x10 : a1 = (1, 1).
+# Les coordonnées mm en sont déduites (calibration des prises si elle existe, sinon grid_xy).
+BLACK_GRAVEYARD_CELLS = []
+WHITE_GRAVEYARD_CELLS = []
 
 # Zone NOIRE (Bleue) : Haut du plateau (Rangs 5 à 9)
-for r in range(5, 10): BLACK_GRAVEYARD.append(grid_xy(0, r)) # Gauche
-for c in range(1, 9): BLACK_GRAVEYARD.append(grid_xy(c, 9))  # Haut
-for r in range(9, 4, -1): BLACK_GRAVEYARD.append(grid_xy(9, r)) # Droite
+for r in range(5, 10): BLACK_GRAVEYARD_CELLS.append((0, r)) # Gauche
+for c in range(1, 9): BLACK_GRAVEYARD_CELLS.append((c, 9))  # Haut
+for r in range(9, 4, -1): BLACK_GRAVEYARD_CELLS.append((9, r)) # Droite
 
 # Zone BLANCHE (Verte) : Bas du plateau (Rangs 4 à 0)
-for r in range(4, -1, -1): WHITE_GRAVEYARD.append(grid_xy(0, r)) # Gauche
-for c in range(1, 9): WHITE_GRAVEYARD.append(grid_xy(c, 0))  # Bas
-for r in range(0, 5): WHITE_GRAVEYARD.append(grid_xy(9, r))  # Droite
+for r in range(4, -1, -1): WHITE_GRAVEYARD_CELLS.append((0, r)) # Gauche
+for c in range(1, 9): WHITE_GRAVEYARD_CELLS.append((c, 0))  # Bas
+for r in range(0, 5): WHITE_GRAVEYARD_CELLS.append((9, r))  # Droite
 
 # Réserves Dames (1 dame par couleur — cases I4 et I5, colonne droite)
-WHITE_QUEEN_RESERVE = [grid_xy(9, 4)]   # I4 : colonne droite, rang 4 (zone blanche)
-BLACK_QUEEN_RESERVE = [grid_xy(9, 5)]   # I5 : colonne droite, rang 5 (zone noire)
+WHITE_QUEEN_RESERVE_CELLS = [(9, 4)]   # I4 : colonne droite, rang 4 (zone blanche)
+BLACK_QUEEN_RESERVE_CELLS = [(9, 5)]   # I5 : colonne droite, rang 5 (zone noire)
+
+# Compatibilité : mêmes emplacements en mm théoriques
+BLACK_GRAVEYARD = [grid_xy(c, r) for c, r in BLACK_GRAVEYARD_CELLS]
+WHITE_GRAVEYARD = [grid_xy(c, r) for c, r in WHITE_GRAVEYARD_CELLS]
+WHITE_QUEEN_RESERVE = [grid_xy(c, r) for c, r in WHITE_QUEEN_RESERVE_CELLS]
+BLACK_QUEEN_RESERVE = [grid_xy(c, r) for c, r in BLACK_QUEEN_RESERVE_CELLS]
+
+# --- PRISE DES PIÈCES (calibrée sur la machine, page Contrôle manuel) ---
+# board_calibration.json contient : position de l'aimant au centre de a1, h1, a8 ;
+# Z de l'aimant posé sur le plateau ; Z de l'aimant posé sur la tête de chaque type de pièce.
+PICK_CLEARANCE_MM = 8.0       # Marge au-dessus de la plus haute pièce pendant les trajets
+PICK_APPROACH_MM  = 4.0       # Les derniers mm de descente se font lentement
+FEED_APPROACH     = 200.0     # mm/min pour l'approche finale
+PICK_GOTO_Z       = 90.0      # Hauteur des trajets tant que les hauteurs de pièces sont inconnues
+MAGNET_DWELL_MS   = 300       # Attente après activation / coupure de l'aimant
 
 # --- VISION ---
 # Caméra USB SQ11 (branchée via USB, détectée comme /dev/video0 ou /dev/video1)
