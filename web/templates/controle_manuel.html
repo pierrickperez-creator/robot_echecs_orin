@@ -216,14 +216,14 @@
         <!-- Calibration des prises -->
         <div class="section-title">🎯 Calibration des prises <span id="pick-state" style="font-weight:normal"></span></div>
         <div style="font-size:10px;color:#888;margin-bottom:4px">
-            Faites d'abord 🏠 HOME G28 et cochez « Pas fin ». Les positions enregistrées sont celles
+            Faites d'abord 🏠 HOME et cochez « Pas fin ». Les positions enregistrées sont celles
             du centre de l'aimant : aucun autre décalage à régler.
         </div>
-        <div style="font-size:11px;color:#ccc;margin:4px 0 2px">1. Surface : au-dessus d'une case vide, descendez jusqu'à toucher le plateau</div>
-        <div class="btn2">
-            <button class="btn-blue" onclick="pickGoto('e5')">Aller e5 (en hauteur)</button>
-            <button class="btn-teal" onclick="pickSave('surface')">📌 Surface ici</button>
+        <div style="font-size:11px;color:#ccc;margin:4px 0 2px">
+            1. Hauteur : après 🏠 HOME (le capteur se pose sur le pion e2), l'aimant est au-dessus du roi e1.
+            Aimant ON, descendez Z par petits pas jusqu'à ce que le roi se soulève, puis 📌.
         </div>
+        <button class="btn-teal" style="width:100%" onclick="pickSave('all')">📌 Hauteur de prise ici (toutes les pièces)</button>
         <div style="font-size:11px;color:#ccc;margin:6px 0 2px">
             2. Centrage : posez une pièce bien au centre de a1, h1 et a8. « Survoler » amène l'aimant
             1 mm au-dessus de la vis ; centrez-le avec X / Y (regardez de face puis de côté), puis 📌.
@@ -245,12 +245,7 @@
             <button class="btn-blue" onclick="pickHover('h8')">Survoler h8</button>
             <button class="btn-blue" onclick="pickHover('e4')">Survoler e4</button>
         </div>
-        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">
-            4. (Facultatif) Réglage fin de la hauteur : aimant posé sur une vis, puis 📌.
-            Par défaut : surface + 33 mm.
-        </div>
-        <button class="btn-teal" style="width:100%" onclick="pickSave('all')">📌 Hauteur de prise ici (toutes les pièces)</button>
-        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">5. Essai de prise réelle (alimentation de l'imprimante allumée)</div>
+        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">4. Essai de prise réelle (alimentation de l'imprimante allumée)</div>
         <div class="z-ref-row">
             <input id="pick-src" value="e2" size="3" style="width:46px;padding:6px;background:#222;color:#eee;border:1px solid #444;border-radius:5px">
             <span style="color:#888">→</span>
@@ -278,10 +273,9 @@
 
         <!-- Actions -->
         <div class="btn2">
-            <button class="btn-blue" onclick="doHome()">🏠 HOME G28</button>
+            <button class="btn-blue" onclick="doHome()">🏠 HOME (capteur sur e2)</button>
             <button class="btn-stop" onclick="doStop()">⛔ URGENCE</button>
         </div>
-        <button class="btn-teal"   style="width:100%" onclick="setHome()">📌 DÉFINIR POSITION HOME</button>
         <button class="btn-purple" style="width:100%;margin-top:6px" onclick="gotoVision()">📷 POSITION CAMÉRA</button>
 
         <!-- Vision -->

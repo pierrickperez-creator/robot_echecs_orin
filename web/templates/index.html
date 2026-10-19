@@ -183,6 +183,18 @@
         }
         #safety-banner.info { background: #123a5a; border-color: #3498db; color: #aed6f1; animation: none; }
 
+        /* Démarrage (homing) */
+        #startup-modal {
+            display: none; position: fixed; inset: 0; z-index: 3000;
+            background: rgba(0,0,0,0.9); align-items: center; justify-content: center;
+        }
+        #startup-modal.show { display: flex; }
+        .startup-box { background: #1c2833; border: 3px solid #f39c12; border-radius: 14px;
+                       padding: 22px 26px; text-align: center; max-width: 560px; }
+        .startup-box h2 { margin: 0 0 10px; color: #f1c40f; }
+        #startup-text { font-size: 16px; color: #ddd; line-height: 1.5; margin-bottom: 16px; }
+        .startup-box button { padding: 16px 30px; font-size: 18px; margin: 4px; }
+
         /* Saisie du coup à l'écran (secours caméra) */
         #touch-modal {
             display: none; position: fixed; inset: 0; z-index: 2000;
@@ -453,6 +465,15 @@
     </div>
 </div>
 
+<!-- Modale de démarrage (homing sur la pièce de référence) -->
+<div id="startup-modal">
+    <div class="startup-box">
+        <h2>🤖 Démarrage du robot</h2>
+        <div id="startup-text"></div>
+        <div id="startup-buttons"></div>
+    </div>
+</div>
+
 <!-- Modale saisie du coup à l'écran -->
 <div id="touch-modal">
     <div class="touch-box">
@@ -681,6 +702,36 @@ function validateMove(uci) {
         document.getElementById('status').textContent = 'Serveur injoignable';
     }).finally(()=>{ actionPending = false; pollStatus(); });
 }
+
+// ─── Démarrage : homing piloté depuis l'écran ─────────────────────────────
+let startupShown = '';
+function updateStartup(d) {
+    const st = d.startup_state || 'pret';
+    const modal = document.getElementById('startup-modal');
+    if (st === 'pret') { modal.classList.remove('show'); startupShown = ''; return; }
+    if (st === startupShown) return;
+    startupShown = st;
+    const text = document.getElementById('startup-text');
+    const btns = document.getElementById('startup-buttons');
+    if (st === 'attente') {
+        text.innerHTML = "Vérifiez que :<br>• l'imprimante est <b>allumée</b><br>• les pièces sont en <b>position de départ</b> (pion e2 et roi e1 en place)<br>• la tête est <b>au-dessus des pièces</b>";
+        btns.innerHTML = '<button class="btn-teal" onclick="startupHome()">▶ DÉMARRER</button>';
+    } else if (st === 'homing') {
+        text.innerHTML = "⏳ Mise en position…<br>Le capteur va se poser sur le pion e2.<br><b>Ne touchez pas le plateau.</b>";
+        btns.innerHTML = '';
+    } else if (st === 'verif') {
+        text.innerHTML = "L'aimant doit être <b>juste au-dessus du roi e1</b>, bien centré.<br>Si c'est bon, touchez CONTINUER.";
+        btns.innerHTML = '<button class="btn-teal" onclick="startupConfirm()">✅ CONTINUER</button>' +
+                         '<a class="nav-btn" href="/controle_manuel" style="display:inline-block;padding:16px 20px">🎮 Régler (Manuel)</a>';
+    } else {
+        text.innerHTML = "⚠️ " + (d.status_msg || "Le démarrage a échoué.") + "<br>Corrigez puis réessayez.";
+        btns.innerHTML = '<button class="btn-teal" onclick="startupHome()">↻ RÉESSAYER</button>' +
+                         '<a class="nav-btn" href="/controle_manuel" style="display:inline-block;padding:16px 20px">🎮 Manuel</a>';
+    }
+    modal.classList.add('show');
+}
+function startupHome()    { startupShown = ''; fetch('/api/startup/home',    {method:'POST'}).then(pollStatus); }
+function startupConfirm() { startupShown = ''; fetch('/api/startup/confirm', {method:'POST'}).then(pollStatus); }
 
 // Met le bouton et le bandeau dans l'état correspondant au serveur
 function updateMainButton(d) {
@@ -951,6 +1002,7 @@ function pollStatus() {
 
         // Bouton principal : J'AI JOUÉ / JOUER ROBOT / robot en action
         updateMainButton(d);
+        updateStartup(d);
 
         // Célébration fin de partie
         if (d.game_over && !wasGameOver && d.outcome) {
