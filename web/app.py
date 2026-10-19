@@ -38,6 +38,9 @@ except ImportError as e:
     sys.exit(1)
 
 app = Flask(__name__)
+# Change à chaque démarrage du serveur : les pages ouvertes se rechargent d'elles-mêmes
+# (l'écran du robot n'a ni clavier ni souris pour faire F5 après une mise à jour).
+APP_VERSION = str(int(time.time()))
 game_engine = ChessEngine()
 vision_engine = VisionEngine()
 
@@ -95,6 +98,7 @@ def init_printer():
         # à l'arrêt. Z tient seul (tiges filetées) ; X/Y ne subissent aucun effort entre deux coups.
         send_gcode_raw(f"M84 S{getattr(config, 'STEPPER_IDLE_OFF_SEC', 5)}")
         read_marlin_position()      # Marlin garde ses coordonnées si seul le serveur a redémarré
+        restore_homing_state()
         log_gcode(f"✅ Marlin connecté sur {port} — relais OFF")
     except Exception as e:
         log_gcode(f"ERREUR CONNEXION MARLIN : {e}")
@@ -212,10 +216,30 @@ def save_z_state():
     import json
     try:
         with open(STATE_FILE, "w") as f:
-            json.dump({"z": last_position['z'], "homed": homed,
+            json.dump({"x": last_position['x'], "y": last_position['y'], "z": last_position['z'], "homed": homed,
                        "date": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
     except Exception:
         pass
+
+
+def restore_homing_state():
+    """
+    Au redémarrage du SERVEUR (pas de la carte) : si Marlin est toujours à la dernière
+    position enregistrée, son homing est encore valable — pas besoin de le refaire.
+    """
+    global homed, startup_state
+    import json
+    try:
+        with open(STATE_FILE) as f:
+            st = json.load(f)
+    except Exception:
+        return
+    pos = last_position
+    same = all(abs(pos[k] - st.get(k, 1e9)) < 0.05 for k in ('x', 'y', 'z'))
+    if st.get("homed") and same and any(abs(pos[k]) > 0.01 for k in ('x', 'y', 'z')):
+        homed = True
+        startup_state = "verif"
+        log_gcode("Homing conservé (la carte n'a pas redémarré).")
 
 
 def load_z_state():
@@ -1790,6 +1814,11 @@ def api_pick_test():
         return jsonify({"status": "error", "msg": f"Erreur : {e}"}), 400
     finally:
         robot_busy.release()
+
+
+@app.route('/api/version')
+def api_version():
+    return jsonify({"version": APP_VERSION})
 
 
 @app.route('/api/position')

@@ -1036,6 +1036,16 @@ function pollCamera() {
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(pollCamera, 300);
 });
+// ─── Rechargement automatique après une mise à jour du serveur ────────────
+(function () {
+    let v0 = null;
+    setInterval(() => {
+        fetch('/api/version').then(r => r.json()).then(d => {
+            if (v0 === null) v0 = d.version;
+            else if (d.version !== v0) location.reload();
+        }).catch(() => {});
+    }, 5000);
+})();
 </script>
 </body>
 </html>
