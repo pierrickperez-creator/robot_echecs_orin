@@ -79,7 +79,9 @@ BLACK_QUEEN_RESERVE = [grid_xy(c, r) for c, r in BLACK_QUEEN_RESERVE_CELLS]
 
 # --- PRISE DES PIÈCES (calibrée sur la machine, page Contrôle manuel) ---
 # board_calibration.json contient : position de l'aimant au centre de a1, h1, a8 ;
-# Z de l'aimant posé sur le plateau ; Z de l'aimant posé sur la tête de chaque type de pièce.
+# Z de l'aimant posé sur le plateau ; Z de prise facultatif (sinon surface + PIECE_HEIGHT_MM).
+PIECE_HEIGHT_MM   = 33.0      # Toutes les pièces : 30 mm + tête de vis de 3 mm (prise par l'aimant)
+HOVER_MM          = 1.0       # Survol au-dessus de la vis pour centrer l'aimant à l'œil
 PICK_CLEARANCE_MM = 8.0       # Marge au-dessus de la plus haute pièce pendant les trajets
 PICK_APPROACH_MM  = 4.0       # Les derniers mm de descente se font lentement
 FEED_APPROACH     = 200.0     # mm/min pour l'approche finale

@@ -255,7 +255,6 @@ def pick_missing():
     missing = [p for p in ('a1', 'h1', 'a8') if p not in pick_calib]
     if 'z_surface' not in pick_calib:
         missing.append('surface')
-    missing += [PIECE_NAMES[t] for t in PIECE_TYPES if t not in pick_calib.get('pick_z', {})]
     return missing
 
 
@@ -296,11 +295,20 @@ def reserve_xy(color_white, idx):
 
 
 def piece_height(ptype):
-    """Hauteur de la pièce au-dessus du plateau (mm), d'après la calibration."""
+    """
+    Hauteur de prise au-dessus du plateau (mm) : mesurée si un réglage fin a été
+    enregistré, sinon hauteur commune des pièces (30 mm + vis 3 mm).
+    """
+    if 'z_surface' not in pick_calib:
+        return None
     pz = pick_calib.get('pick_z', {})
-    if ptype in pz and 'z_surface' in pick_calib:
+    if ptype in pz:
         return pz[ptype] - pick_calib['z_surface']
-    return None
+    return config.PIECE_HEIGHT_MM
+
+
+def pick_z(ptype):
+    return pick_calib['z_surface'] + piece_height(ptype)
 
 
 def travel_z():
@@ -533,7 +541,7 @@ def move_piece(fx, fy, tx, ty, ptype='k'):
     if config.SIMULATION_MODE and piece_height(ptype) is None:
         z_pick, z_travel, z_carry = config.Z_BOARD, config.Z_TRAVEL_REL, config.Z_TRAVEL_REL
     else:
-        z_pick = pick_calib['pick_z'][ptype]
+        z_pick = pick_z(ptype)
         z_travel = travel_z()
         z_carry = z_travel + piece_height(ptype)
     z_near = z_pick + config.PICK_APPROACH_MM
@@ -1519,6 +1527,52 @@ def api_pick_goto():
     return jsonify({"status": "ok", "x": round(x, 2), "y": round(y, 2), "z": round(z, 2)})
 
 
+@app.route('/api/pick/hover', methods=['POST'])
+def api_pick_hover():
+    """
+    Amène l'aimant juste au-dessus de la vis d'une pièce posée sur `square`
+    (HOVER_MM au-dessus de la hauteur de prise) pour vérifier / régler le centrage à l'œil.
+    """
+    if 'z_surface' not in pick_calib:
+        return jsonify({"status": "error", "msg": "Enregistrez d'abord la surface du plateau."}), 400
+    sq = (request.json.get('square') or 'a1').lower()
+    try:
+        x, y = calculate_xy(sq)
+    except Exception:
+        return jsonify({"status": "error", "msg": f"Case inconnue : {sq}"}), 400
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+    try:
+        z_hover = pick_z('p') + config.HOVER_MM
+        lift_to(travel_z())
+        move_xyz(x, y, max(last_position['z'], travel_z()))
+        move_xyz(x, y, z_hover + config.PICK_APPROACH_MM)
+        move_xyz(x, y, z_hover, feed=config.FEED_APPROACH)
+        return jsonify({"status": "ok", "x": round(x, 2), "y": round(y, 2), "z": round(z_hover, 2),
+                        "msg": f"Aimant {config.HOVER_MM:g} mm au-dessus de la vis en {sq}"})
+    finally:
+        robot_busy.release()
+
+
+@app.route('/api/magnet/test', methods=['POST'])
+def api_magnet_test():
+    """
+    Test du relais de l'aimant : 'servo' = M280 (réglage actuel), 'pin' = M42 sur la broche
+    MAGNET_PIN. Active 2 s puis coupe : on doit entendre le relais claquer deux fois.
+    """
+    mode = (request.json.get('mode') or 'servo').lower()
+    if mode == 'pin':
+        on, off = f"M42 P{config.MAGNET_PIN} S255", f"M42 P{config.MAGNET_PIN} S0"
+    else:
+        idx = config.MAGNET_SERVO_IDX
+        on, off = f"M280 P{idx} S{config.MAGNET_SERVO_ON}", f"M280 P{idx} S{config.MAGNET_SERVO_OFF}"
+    send_gcode_raw(on)
+    time.sleep(2)
+    send_gcode_raw(off)
+    log_gcode(f"🧲 Test relais ({mode}) : {on} puis {off}")
+    return jsonify({"status": "ok", "msg": f"{on} pendant 2 s puis {off}. Le relais a-t-il claqué ?"})
+
+
 @app.route('/api/pick/save', methods=['POST'])
 def api_pick_save():
     """
@@ -1535,6 +1589,10 @@ def api_pick_save():
     elif what == 'surface':
         pick_calib['z_surface'] = round(pos['z'], 2)
         msg = f"Surface du plateau = Z{pos['z']:.1f}"
+    elif what == 'all':
+        pick_calib['pick_z'] = {t: round(pos['z'], 2) for t in PIECE_TYPES}
+        h = piece_height('p')
+        msg = f"Prise de toutes les pièces à Z{pos['z']:.1f}" + (f" ({h:.1f} mm au-dessus du plateau)" if h is not None else "")
     elif what in PIECE_TYPES:
         pick_calib.setdefault('pick_z', {})[what] = round(pos['z'], 2)
         h = piece_height(what)

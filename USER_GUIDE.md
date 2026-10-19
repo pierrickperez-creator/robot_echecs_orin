@@ -289,14 +289,17 @@ Cette page permet de contrôler manuellement les moteurs du robot sans jouer aux
 
 **Réglage Z de prise** : Ajuste la hauteur à laquelle l'aimant attrape les pièces.
 
-**🎯 Calibration des prises** (obligatoire avant toute partie, le robot refuse de bouger les pièces sans elle) :
+**🎯 Calibration des prises** (obligatoire avant toute partie, le robot refuse de bouger les pièces sans elle). Toutes les pièces font 33 mm (30 mm + tête de vis de 3 mm), une seule hauteur suffit :
 1. **🏠 HOME G28**, puis cochez **Pas fin** (les boutons ±1 avancent de 0,2 mm)
-2. **Aller a1** : centrez l'aimant au-dessus du centre de a1 avec X / Y, puis **📌 a1 ici**. Idem pour **h1** et **a8**
-3. Au-dessus d'une case vide, descendez en Z jusqu'à ce que l'aimant touche le plateau, puis **📌 Surface du plateau ici**
-4. Pour chaque type de pièce : placez l'aimant au-dessus de la pièce, descendez jusqu'à toucher la vis de sa tête, puis **📌 Pion / Cavalier / Fou / Tour / Dame / Roi**
-5. **Essai** : choisissez la pièce et la case, **⬆ Soulever / reposer**, puis **➜ Déplacer**
+2. **Aller e5** : descendez en Z jusqu'à ce que l'aimant touche le plateau, puis **📌 Surface ici**
+3. Posez une pièce bien au centre de a1, h1 et a8. **Survoler a1** amène l'aimant 1 mm au-dessus de la vis : centrez avec X / Y en regardant de face puis de côté, puis **📌 a1 centré**. Idem pour h1 et a8
+4. Vérifiez avec **Survoler h8** et **Survoler e4** (pièces posées) : l'aimant doit tomber pile sur la vis
+5. Facultatif : aimant posé sur une vis, **📌 Hauteur de prise ici** (sinon surface + 33 mm)
+6. **Essai** : **⬆ Soulever / reposer** puis **➜ Déplacer**
 
-Le robot en déduit la position de toutes les cases et des cimetières, et la hauteur de transport (au-dessus de la plus haute pièce). Tout est enregistré dans `board_calibration.json`.
+Les positions enregistrées sont celles du centre de l'aimant. Le robot en déduit toutes les cases et les cimetières. Tout est enregistré dans `board_calibration.json`.
+
+**🔊 Test relais** (section Électroaimant) : active l'aimant 2 s. On doit entendre le relais claquer. Si rien avec M280, essayer M42 P11.
 
 **Caméra** : **🎯 CALIBRER CAMÉRA** et **📸 PHOTO RÉFÉRENCE** (voir « Calibrer la caméra » au chapitre 6), avec l'image analysée par le robot.
 
