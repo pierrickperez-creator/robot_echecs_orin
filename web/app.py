@@ -244,12 +244,27 @@ class CameraStream:
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self._apply_v4l2_controls(cam_id)
             ret, frame = cap.read()
             if ret and frame is not None:
                 print(f"✅ Caméra USB (V4L2 id={cam_id}) ouverte avec succès.")
                 return cap, f"USB V4L2 (id={cam_id})"
         cap.release()
         return None, None
+
+    @staticmethod
+    def _apply_v4l2_controls(cam_id):
+        """Exposition / balance des blancs fixes (config.CAMERA_V4L2_CONTROLS)."""
+        controls = getattr(config, 'CAMERA_V4L2_CONTROLS', {})
+        if not controls:
+            return
+        args = ['v4l2-ctl', '-d', f'/dev/video{cam_id}']
+        for k, v in controls.items():
+            args += ['-c', f'{k}={v}']
+        try:
+            subprocess.run(args, capture_output=True, timeout=5)
+        except Exception as e:
+            print(f"⚠️ Réglages caméra non appliqués : {e}")
 
     def _create_error_frame(self, message="Caméra non disponible"):
         """Crée une image JPEG d'erreur quand aucune caméra n'est accessible."""
@@ -1064,6 +1079,38 @@ def api_vision_calibrate():
         return jsonify({"status": "ok", "msg": "Calibration réussie et enregistrée."})
     finally:
         robot_busy.release()
+
+
+@app.route('/api/vision/learn_pieces', methods=['POST'])
+def api_vision_learn_pieces():
+    """Apprend la forme des socles : toutes les pièces en position de départ."""
+    if not vision_engine.is_calibrated():
+        return jsonify({"status": "error", "msg": "Calibrez d'abord la caméra."}), 400
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+    try:
+        move_to_vision_position()
+        time.sleep(getattr(config, 'VISION_SETTLE_SEC', 1.0))
+        frame = grab_stable_frame(5)
+        if frame is None:
+            return jsonify({"status": "error", "msg": "Caméra indisponible."}), 503
+        rep = vision_engine.learn_piece_bases(frame, chess.Board())
+        log_gcode(f"♟ Socles appris : {rep['learned']} pièces, fiabilité estimée {rep['type_accuracy']} %")
+        return jsonify({"status": "ok", **rep,
+                        "msg": f"{rep['learned']} socles mémorisés — fiabilité estimée {rep['type_accuracy']} % "
+                               f"(type de pièce), {rep['full_accuracy']} % (type + couleur)."})
+    finally:
+        robot_busy.release()
+
+
+@app.route('/piece_shapes.jpg')
+def piece_shapes_sheet():
+    """Planche de contrôle de l'apprentissage des socles."""
+    path = os.path.splitext(vision_engine.PIECE_FILE)[0] + ".jpg"
+    if not os.path.exists(path):
+        return Response(status=404)
+    with open(path, 'rb') as fh:
+        return Response(fh.read(), mimetype='image/jpeg')
 
 
 @app.route('/api/vision/reference', methods=['POST'])

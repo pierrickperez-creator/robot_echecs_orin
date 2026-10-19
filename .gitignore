@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 *.log
 vision_calibration.json
+piece_shapes.json
+piece_shapes.jpg

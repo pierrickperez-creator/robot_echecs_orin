@@ -74,6 +74,16 @@ BLACK_QUEEN_RESERVE = [grid_xy(9, 5)]   # I5 : colonne droite, rang 5 (zone noir
 CAMERA_USB_INDEX = 0          # Index V4L2 de la caméra USB (0 = première caméra USB détectée)
 CAMERA_WIDTH  = 640           # Résolution en sortie de la caméra SQ11
 CAMERA_HEIGHT = 480
+# Réglages appliqués à l'ouverture (v4l2-ctl). Exposition et balance des blancs FIXES :
+# en automatique, l'image change d'une photo à l'autre et fausse la comparaison des coups.
+# Exposition 300 réglée sur la machine (en auto, 26 % de l'image était saturée en blanc).
+CAMERA_V4L2_CONTROLS = {
+    "auto_exposure": 1,                # 1 = manuel
+    "exposure_time_absolute": 300,
+    "white_balance_automatic": 0,
+    "white_balance_temperature": 4600,
+}
+VISION_PIECE_CHROMA_MAX = 20  # Socles : pixel "pièce" si peu coloré (le bois est jaune-orangé)
 BOARD_PX      = 400
 BOARD_CORNERS = None          # Sera calibré avec les 4 dames noires
 

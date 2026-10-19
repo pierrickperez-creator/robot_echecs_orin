@@ -244,6 +244,8 @@
             <button class="btn-teal"   onclick="visionCall('/api/vision/calibrate', this)">🎯 CALIBRER CAMÉRA</button>
             <button class="btn-purple" onclick="visionCall('/api/vision/reference', this)">📸 PHOTO RÉFÉRENCE</button>
         </div>
+        <button class="btn-blue" style="width:100%;margin-top:6px"
+                onclick="visionCall('/api/vision/learn_pieces', this)">♟ APPRENDRE LES SOCLES (position de départ)</button>
         <div id="vision-msg" style="font-size:11px;color:#aaa;text-align:center;margin:4px 0"></div>
         <img id="vision-debug" src="/api/vision_frame" alt="Vue caméra analysée"
              style="width:100%;border-radius:6px;background:#000;cursor:pointer"

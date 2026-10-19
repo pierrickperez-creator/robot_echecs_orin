@@ -279,6 +279,157 @@ class VisionEngine:
             return None, "Plusieurs coups possibles, impossible de trancher."
         return best, "ok"
 
+    # ── Apprentissage des socles (forme ↔ pièce) ─────────────────────────────
+    PIECE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "piece_shapes.json")
+    HI_CELL = 60   # px par case pour l'analyse de forme (≈ résolution native de la caméra)
+
+    def _warp_hi(self, frame):
+        s = self.HI_CELL / 40.0
+        m = np.diag([s, s, 1.0]) @ self.homography_matrix
+        return cv2.warpPerspective(frame, m, (10 * self.HI_CELL, 10 * self.HI_CELL))
+
+    @staticmethod
+    def _piece_mask(warped):
+        """Pièces (blanches comme noires) = peu colorées ; le bois est jaune-orangé."""
+        lab = cv2.cvtColor(cv2.GaussianBlur(warped, (5, 5), 0), cv2.COLOR_BGR2LAB).astype(np.float32)
+        chroma = np.hypot(lab[..., 1] - 128, lab[..., 2] - 128)
+        mask = (chroma < getattr(config, "VISION_PIECE_CHROMA_MAX", 20)).astype(np.uint8) * 255
+        return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)), lab[..., 0]
+
+    def _base_features(self, mask, lum, square):
+        """Descripteurs de la forme du socle posé sur `square` (None si case vide)."""
+        n = self.HI_CELL
+        c, r = self.square_to_cell(square)
+        m = n // 10
+        crop = mask[r * n - m:(r + 1) * n + m, c * n - m:(c + 1) * n + m]
+        lcrop = lum[r * n - m:(r + 1) * n + m, c * n - m:(c + 1) * n + m]
+        cnts, _ = cv2.findContours(crop, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        ctr = np.array([crop.shape[1] / 2, crop.shape[0] / 2])
+        best, best_score = None, 0
+        for cnt in cnts:
+            area = cv2.contourArea(cnt)
+            if area < 0.12 * n * n:
+                continue
+            x, y, w, h = cv2.boundingRect(cnt)
+            score = area / (1 + np.linalg.norm(np.array([x + w / 2, y + h / 2]) - ctr))
+            if score > best_score:
+                best, best_score = cnt, score
+        if best is None:
+            return None
+        area = cv2.contourArea(best)
+        hull = cv2.convexHull(best)
+        hull_area = max(cv2.contourArea(hull), 1)
+        peri = max(cv2.arcLength(best, True), 1)
+        approx = cv2.approxPolyDP(best, 0.03 * peri, True)
+        defects = 0
+        hull_idx = cv2.convexHull(best, returnPoints=False)
+        if hull_idx is not None and len(hull_idx) > 3:
+            d = cv2.convexityDefects(best, hull_idx)
+            if d is not None:
+                defects = int((d[:, 0, 3] / 256.0 > 0.08 * n).sum())
+        hu = cv2.HuMoments(cv2.moments(best)).flatten()[:3]
+        hu = -np.sign(hu) * np.log10(np.abs(hu) + 1e-12)
+        piece_mask = np.zeros_like(crop)
+        cv2.drawContours(piece_mask, [best], -1, 255, -1)
+        mean_l = float(lcrop[piece_mask > 0].mean())
+        feats = [area / (n * n), area / hull_area, 4 * np.pi * area / peri ** 2,
+                 min(len(approx), 12) / 12.0, min(defects, 6) / 6.0] + list(hu / 4.0)
+        return {"features": [float(f) for f in feats], "lum": mean_l}
+
+    def learn_piece_bases(self, frame, board):
+        """
+        Mémorise la forme du socle de chaque pièce présente sur `board` (position connue,
+        normalement la position de départ). Enregistre piece_shapes.json et une planche
+        d'images piece_shapes.jpg. Retourne un rapport (dont une estimation de fiabilité).
+        """
+        import json
+        warped = self._warp_hi(frame)
+        mask, lum = self._piece_mask(warped)
+        samples, missing = [], []
+        for sq, piece in board.piece_map().items():
+            f = self._base_features(mask, lum, sq)
+            if f is None:
+                missing.append(piece.symbol())
+                continue
+            samples.append({"square": sq, "piece": piece.symbol(), **f})
+        dark = [s["lum"] for s in samples if s["piece"].islower()]
+        light = [s["lum"] for s in samples if s["piece"].isupper()]
+        lum_split = (np.mean(dark) + np.mean(light)) / 2 if dark and light else 110.0
+        self.piece_db = {"samples": samples, "lum_split": float(lum_split),
+                         "date": time.strftime("%Y-%m-%d %H:%M:%S")}
+        with open(self.PIECE_FILE, "w") as fh:
+            json.dump(self.piece_db, fh, indent=1)
+        self._save_piece_sheet(warped, mask, board)
+
+        # Fiabilité estimée : chaque socle reconnu à partir de tous les autres
+        ok_type = ok_full = 0
+        errors = []
+        for i, s in enumerate(samples):
+            others = samples[:i] + samples[i + 1:]
+            guess = self._knn(s["features"], s["lum"], others, lum_split)
+            ok_type += guess.lower() == s["piece"].lower()
+            ok_full += guess == s["piece"]
+            if guess != s["piece"]:
+                import chess
+                errors.append(f"{chess.square_name(s['square'])}:{s['piece']}→{guess}")
+        n = max(len(samples), 1)
+        return {"learned": len(samples), "missing": missing,
+                "type_accuracy": round(100 * ok_type / n), "full_accuracy": round(100 * ok_full / n),
+                "errors": errors}
+
+    def _knn(self, feats, lum, samples, lum_split, k=3):
+        is_black = lum < lum_split
+        # La forme ne dépend pas de la couleur : on compare à tous les socles appris,
+        # la couleur est donnée à part par la luminosité.
+        d = sorted(samples, key=lambda s: np.linalg.norm(np.array(s["features"]) - np.array(feats)))[:k]
+        votes = {}
+        for rank, s in enumerate(d):
+            t = s["piece"].lower()
+            votes[t] = votes.get(t, 0) + 1.0 / (1 + rank)
+        t = max(votes, key=votes.get)
+        return t if is_black else t.upper()
+
+    def load_piece_db(self):
+        import json
+        try:
+            with open(self.PIECE_FILE) as fh:
+                self.piece_db = json.load(fh)
+        except Exception:
+            self.piece_db = None
+        return self.piece_db
+
+    def identify_piece(self, frame, square):
+        """Symbole de la pièce sur `square` d'après la forme de son socle (None si inconnu)."""
+        db = getattr(self, "piece_db", None) or self.load_piece_db()
+        if not db or self.homography_matrix is None:
+            return None
+        warped = self._warp_hi(frame)
+        mask, lum = self._piece_mask(warped)
+        f = self._base_features(mask, lum, square)
+        if f is None:
+            return None
+        return self._knn(f["features"], f["lum"], db["samples"], db["lum_split"])
+
+    def _save_piece_sheet(self, warped, mask, board):
+        """Planche de contrôle : chaque case occupée, image + masque du socle."""
+        import chess
+        n = self.HI_CELL
+        tiles = []
+        for sq in sorted(board.piece_map(), key=lambda q: (-(q // 8), q % 8)):
+            c, r = self.square_to_cell(sq)
+            img = warped[r * n:(r + 1) * n, c * n:(c + 1) * n].copy()
+            msk = cv2.cvtColor(mask[r * n:(r + 1) * n, c * n:(c + 1) * n], cv2.COLOR_GRAY2BGR)
+            tile = np.vstack([img, msk])
+            cv2.putText(tile, f"{chess.square_name(sq)} {board.piece_at(sq).symbol()}", (2, 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+            tiles.append(tile)
+        if tiles:
+            rows = [np.hstack(tiles[i:i + 8]) for i in range(0, len(tiles), 8)]
+            w = max(r_.shape[1] for r_ in rows)
+            rows = [np.pad(r_, ((0, 0), (0, w - r_.shape[1]), (0, 0))) for r_ in rows]
+            cv2.imwrite(os.path.splitext(self.PIECE_FILE)[0] + ".jpg", np.vstack(rows))
+
     def recognize_piece_shape(self, frame, col, row):
         """
         Analyse la forme du socle de la pièce sur une case donnée.
