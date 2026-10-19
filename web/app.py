@@ -91,6 +91,7 @@ def init_printer():
         # Moteurs coupés après quelques secondes d'arrêt : supprime le sifflement des moteurs
         # à l'arrêt. Z tient seul (tiges filetées) ; X/Y ne subissent aucun effort entre deux coups.
         send_gcode_raw(f"M84 S{getattr(config, 'STEPPER_IDLE_OFF_SEC', 5)}")
+        read_marlin_position()      # Marlin garde ses coordonnées si seul le serveur a redémarré
         log_gcode(f"✅ Marlin connecté sur {port} — relais OFF")
     except Exception as e:
         log_gcode(f"ERREUR CONNEXION MARLIN : {e}")
@@ -248,6 +249,9 @@ def z_endstop_triggered():
 def sensor_square_to_magnet_xy(square):
     """Position de l'aimant pour que le CAPTEUR soit au centre de `square`."""
     x, y = calculate_xy(square)
+    if 'sensor_offset' in pick_calib:   # décalage aimant → capteur mesuré sur la machine
+        dx, dy = pick_calib['sensor_offset']
+        return x - dx, y - dy
     # Direction "vers la rangée 8" en coordonnées machine (d'après la calibration a1 → a8)
     ax, ay = grid_to_xy(1, 1)
     bx, by = grid_to_xy(1, 8)
@@ -1806,6 +1810,13 @@ def api_pick_save():
     if what in ('a1', 'h1', 'a8'):
         pick_calib[what] = [round(pos['x'], 2), round(pos['y'], 2)]
         msg = f"{what} = X{pos['x']:.1f} Y{pos['y']:.1f}"
+    elif what == 'sensor':
+        # Le CAPTEUR est au centre de la case de référence : on en déduit le décalage aimant → capteur
+        rx, ry = calculate_xy(config.Z_REF_SQUARE)
+        pick_calib['sensor_offset'] = [round(rx - pos['x'], 2), round(ry - pos['y'], 2)]
+        dx, dy = pick_calib['sensor_offset']
+        msg = (f"Capteur centré sur {config.Z_REF_SQUARE} : décalage aimant → capteur "
+               f"X{dx:+.1f} Y{dy:+.1f} mm ({(dx * dx + dy * dy) ** 0.5:.1f} mm)")
     elif what == 'surface':
         pick_calib['z_surface'] = round(pos['z'], 2)
         msg = f"Surface du plateau = Z{pos['z']:.1f}"
