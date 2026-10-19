@@ -130,6 +130,7 @@ HOME_ON_STARTUP = False   # Pas de homing automatique : il se lance depuis l'éc
 # (Le firmware interdit de descendre sous le point de homing : pas de homing logiciel possible.)
 VERIFY_SQUARE        = "e1"   # après le homing, l'aimant se place au-dessus de ce roi pour vérification
 Z_BEFORE_PICK_CALIB  = 20.0   # hauteur des trajets juste après le homing, tant que la prise n'est pas réglée
+Z_FLOOR_AFTER_HOME   = -2.0   # mesuré : le firmware autorise 2 mm sous le point de homing (Z_MIN_POS)
 STEPPER_IDLE_OFF_SEC = 5      # coupe les moteurs après 5 s d'arrêt (supprime le sifflement)
 
 _detected_path = shutil.which("stockfish")
