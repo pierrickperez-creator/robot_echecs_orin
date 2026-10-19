@@ -249,6 +249,14 @@
             <button class="btn-blue" onclick="pickHover('h8')">Survoler h8</button>
             <button class="btn-blue" onclick="pickHover('e4')">Survoler e4</button>
         </div>
+        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">
+            Correction d'une case mal centrée : « Survoler », centrez l'aimant sur la vis, puis 📌.
+        </div>
+        <div class="z-ref-row">
+            <input id="fix-sq" value="e1" size="3" style="width:46px;padding:6px;background:#222;color:#eee;border:1px solid #444;border-radius:5px">
+            <button class="btn-blue" style="flex:1" onclick="pickHover(document.getElementById('fix-sq').value.trim().toLowerCase())">Survoler</button>
+            <button class="btn-teal" style="flex:1" onclick="pickSavePoint()">📌 Case centrée ici</button>
+        </div>
         <div style="font-size:11px;color:#ccc;margin:6px 0 2px">4. Essai de prise réelle (alimentation de l'imprimante allumée)</div>
         <div class="z-ref-row">
             <input id="pick-src" value="e2" size="3" style="width:46px;padding:6px;background:#222;color:#eee;border:1px solid #444;border-radius:5px">
@@ -488,6 +496,12 @@ function pickGoto(square) {
 function pickSave(what) {
     fetch('/api/pick/save', {method: 'POST', headers: {'Content-Type': 'application/json'},
                              body: JSON.stringify({what})})
+    .then(r => r.json()).then(d => { pickMsg((d.status === 'ok' ? '✅ ' : '❌ ') + d.msg); pickRefresh(); });
+}
+function pickSavePoint() {
+    const square = document.getElementById('fix-sq').value.trim().toLowerCase();
+    fetch('/api/pick/save', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                             body: JSON.stringify({what: 'point', square})})
     .then(r => r.json()).then(d => { pickMsg((d.status === 'ok' ? '✅ ' : '❌ ') + d.msg); pickRefresh(); });
 }
 function pickHover(square) {
