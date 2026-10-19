@@ -46,6 +46,11 @@ VISION_Y       = 180.0        # mm — réglé sur la machine : tout l'échiquie
 Z_VISION       = 150.0        # mm — hauteur de la tête (à 100 mm seules les rangées 3-8 étaient visibles)
 
 FEED_TRAVEL    = 4000.0
+# Le PLATEAU bouge en Y avec les pièces dessus : démarrages et arrêts en douceur.
+# Envoyés au démarrage (M201 / M204 / M205), non sauvegardés dans la carte.
+Y_MAX_ACCEL    = 250          # mm/s² (firmware : 1000)
+TRAVEL_ACCEL   = 1000         # mm/s² accélération des déplacements (firmware : 3000)
+XY_JERK        = 5            # mm/s  changement de vitesse instantané (firmware : 20)
 FEED_Z         = 1000.0
 
 # --- ZONES DE STOCKAGE (EN FORME DE U) ---

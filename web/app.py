@@ -97,6 +97,10 @@ def init_printer():
         # Moteurs coupés après quelques secondes d'arrêt : supprime le sifflement des moteurs
         # à l'arrêt. Z tient seul (tiges filetées) ; X/Y ne subissent aucun effort entre deux coups.
         send_gcode_raw(f"M84 S{getattr(config, 'STEPPER_IDLE_OFF_SEC', 5)}")
+        # Plateau (Y) en douceur : les pièces posées dessus ne doivent pas glisser
+        send_gcode_raw(f"M201 Y{config.Y_MAX_ACCEL}")
+        send_gcode_raw(f"M204 T{config.TRAVEL_ACCEL}")
+        send_gcode_raw(f"M205 X{config.XY_JERK}")
         read_marlin_position()      # Marlin garde ses coordonnées si seul le serveur a redémarré
         restore_homing_state()
         log_gcode(f"✅ Marlin connecté sur {port} — relais OFF")
