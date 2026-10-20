@@ -116,6 +116,10 @@
                  font-size: 13px; cursor: pointer; color: white; transition: 0.12s; }
         button:active { transform: scale(0.95); }
         .btn-blue  { background: #2980b9; }
+        .snd-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+        .snd-choice { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ddd;
+                      background: #222; border-radius: 6px; padding: 8px 10px; cursor: pointer; }
+        .snd-choice input { width: 20px; height: 20px; }
         .btn-stop  { background: #c0392b; }
         .btn-teal   { background: #16a085; }
         .btn-purple { background: #8e44ad; }
@@ -211,6 +215,25 @@
             <input type="range" id="feed-slider" min="1" max="100" step="1" value="33"
                    oninput="document.getElementById('feed-display').textContent=this.value+' mm/s'">
             <span id="feed-display">33 mm/s</span>
+        </div>
+
+        <!-- Sons -->
+        <div class="section-title">🔊 Sons</div>
+        <div class="feed-row">
+            <label style="width:80px">Volume</label>
+            <input type="range" id="snd-volume" min="0" max="100" step="5"
+                   oninput="document.getElementById('snd-volume-v').textContent=this.value+' %'"
+                   onchange="saveSound({volume: this.value / 100}); RobotSounds.set({volume: this.value / 100}); RobotSounds.preview('move', RobotSounds.cfg.move)">
+            <span id="snd-volume-v">—</span>
+        </div>
+        <button class="btn-teal" style="width:100%" onclick="RobotSounds.preview('move', RobotSounds.cfg.move)">🔊 Test son</button>
+        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">Fin de coup du robot (cochez pour écouter et choisir)</div>
+        <div id="snd-move" class="snd-choices"></div>
+        <div style="font-size:11px;color:#ccc;margin:6px 0 2px">Échec au roi</div>
+        <div id="snd-check" class="snd-choices"></div>
+        <div style="font-size:10px;color:#888;margin:2px 0 8px">
+            Les sons ne marchent qu'après un premier toucher de l'écran (règle du navigateur).
+            Sons personnels : déposez coup.mp3, echec.mp3, victoire.mp3 dans le dossier sounds/.
         </div>
 
         <!-- Vitesses -->
@@ -333,6 +356,7 @@
     </div>
 </div>
 
+<script src="/static/sounds.js"></script>
 <script>
 // ─── Définition grille (même que index.html) ──────────────────────────────
 const WHITE_GY = [];
@@ -550,6 +574,38 @@ function pickTest(sameSquare) {
     .catch(() => pickMsg('❌ Serveur injoignable'));
 }
 pickRefresh();
+
+// ─── Sons ─────────────────────────────────────────────────────────────────
+function saveSound(data) {
+    fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(data)});
+}
+function buildChoices(boxId, group, choices, current) {
+    const box = document.getElementById(boxId);
+    box.innerHTML = Object.entries(choices).map(([key, c]) =>
+        `<label class="snd-choice"><input type="checkbox" data-key="${key}" ${key === current ? 'checked' : ''}> ${c.label}</label>`
+    ).join('');
+    box.querySelectorAll('input').forEach(cb => cb.addEventListener('change', () => {
+        // Une seule case cochée par groupe ; cocher fait entendre le son
+        box.querySelectorAll('input').forEach(o => { if (o !== cb) o.checked = false; });
+        cb.checked = true;
+        const key = cb.dataset.key;
+        RobotSounds.set(group === 'move' ? {move: key} : {check: key});
+        RobotSounds.preview(group, key);
+        saveSound(group === 'move' ? {move_sound: key} : {check_sound: key});
+    }));
+}
+function loadSounds() {
+    fetch('/api/settings').then(r => r.json()).then(d => {
+        RobotSounds.set({on: d.sound, volume: d.volume, move: d.move_sound, check: d.check_sound});
+        const v = Math.round(d.volume * 100);
+        document.getElementById('snd-volume').value = v;
+        document.getElementById('snd-volume-v').textContent = v + ' %';
+        buildChoices('snd-move', 'move', RobotSounds.MOVE, d.move_sound);
+        buildChoices('snd-check', 'check', RobotSounds.CHECK, d.check_sound);
+    });
+}
+loadSounds();
 
 function loadSpeeds() {
     fetch('/api/settings').then(r => r.json()).then(d => {

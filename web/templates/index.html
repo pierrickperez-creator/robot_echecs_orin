@@ -187,6 +187,17 @@
         }
         #safety-banner.info { background: #123a5a; border-color: #3498db; color: #aed6f1; animation: none; }
 
+        /* Échec au roi */
+        #check-banner {
+            display: none; position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%);
+            z-index: 2500; padding: 18px 34px; border-radius: 16px; font-size: 34px; font-weight: bold;
+            color: #fff; background: rgba(192, 57, 43, 0.92); border: 3px solid #f5b7b1;
+            box-shadow: 0 0 40px rgba(231, 76, 60, 0.7); pointer-events: none;
+        }
+        #check-banner.show { display: block; animation: check-pop 0.35s ease-out; }
+        @keyframes check-pop { from { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+                               to   { transform: translate(-50%, -50%) scale(1);   opacity: 1; } }
+
         /* Coach (page Progresser) */
         #coach-box { background: #10202c; border: 2px solid #2980b9; border-radius: 10px; padding: 10px 12px; }
         #coach-last { font-size: 20px; font-weight: bold; text-align: center; min-height: 28px; }
@@ -497,6 +508,8 @@
     </div>
 </div>
 
+<div id="check-banner"></div>
+
 <!-- Modale de démarrage (homing sur la pièce de référence) -->
 <div id="startup-modal">
     <div class="startup-box">
@@ -558,6 +571,7 @@
     <button onclick="closeSelector()" style="width:100%;margin-top:7px;background:#c0392b;">ANNULER</button>
 </div>
 
+<script src="/static/sounds.js"></script>
 <script>
 // ─── Cimetière (cases I4=c9r4 blanc, I5=c9r5 noir) ────────────────────────
 const WHITE_GY = [];
@@ -780,62 +794,32 @@ function renderCoach(list) {
     if (g.label === 'Gaffe' || g.label === 'Erreur') playSound('nulle');
 }
 
-// ─── Sons (haut-parleurs de l'écran) ──────────────────────────────────────
+// ─── Sons (bibliothèque commune /static/sounds.js) ────────────────────────
 let soundOn = true;
-let audioCtx = null;
-function audio() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    return audioCtx;
-}
-// Le navigateur n'autorise le son qu'après un premier toucher de l'écran
-document.addEventListener('pointerdown', () => { try { audio(); } catch (e) {} }, {once: true});
-
-function note(freq, start, dur, vol = 0.25, type = 'triangle') {
-    const ctx = audio(), t = ctx.currentTime + start;
-    const osc = ctx.createOscillator(), gain = ctx.createGain(), lp = ctx.createBiquadFilter();
-    osc.type = type; osc.frequency.value = freq;
-    lp.type = 'lowpass'; lp.frequency.value = 2500;          // son rond, pas criard
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(vol, t + 0.015);   // attaque douce
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);  // extinction lente
-    osc.connect(lp); lp.connect(gain); gain.connect(ctx.destination);
-    osc.start(t); osc.stop(t + dur + 0.05);
-}
-function playFile(name, fallback) {
-    // Fichier personnel dans sounds/ s'il existe, sinon son généré
-    let done = false;
-    const once = () => { if (!done) { done = true; fallback(); } };
-    const a = new Audio('/sounds/' + name + '?t=' + Date.now());
-    a.onerror = once;
-    a.play().then(() => { done = true; }).catch(once);
-}
-const SOUNDS = {
-    // Carillon chaleureux : quinte montante, notes qui se recouvrent
-    coup: () => { note(523.25, 0, 0.9, 0.22); note(783.99, 0.14, 1.1, 0.18); note(1046.5, 0.14, 1.1, 0.05, 'sine'); },
-    // Fanfare « trésor » originale : arpège qui monte puis accord tenu
-    victoire: () => {
-        [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => note(f, i * 0.13, 0.5, 0.2));
-        [523.25, 659.25, 783.99, 1046.5].forEach(f => note(f, 0.6, 1.8, 0.12));
-        note(1318.5, 0.6, 1.8, 0.06, 'sine');
-    },
-    // Robot gagnant : petit motif descendant, sans dramatiser
-    defaite: () => { [659.25, 587.33, 523.25, 392.0].forEach((f, i) => note(f, i * 0.18, 0.6, 0.16)); },
-    nulle: () => { note(587.33, 0, 0.6, 0.16); note(587.33, 0.25, 0.9, 0.14); },
-};
-function playSound(name) {
-    if (!soundOn) return;
-    try { playFile(name + '.mp3', () => SOUNDS[name] && SOUNDS[name]()); } catch (e) {}
-}
+function playSound(name) { RobotSounds.play(name); }
 function setSoundButton() {
     const b = document.getElementById('sound-btn');
     if (b) { b.textContent = soundOn ? '🔊' : '🔇'; b.style.opacity = soundOn ? 1 : 0.6; }
 }
 function toggleSound() {
-    soundOn = !soundOn; setSoundButton();
+    soundOn = !soundOn; RobotSounds.set({on: soundOn}); setSoundButton();
     fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
                             body: JSON.stringify({sound: soundOn})});
-    if (soundOn) SOUNDS.coup();
+    if (soundOn) RobotSounds.play('coup');
+}
+
+// ─── Annonce de l'échec au roi ────────────────────────────────────────────
+let checkAnnounced = -1;
+function announceCheck(d) {
+    // Une seule fois par position, et seulement quand le robot a fini de bouger
+    if (!d.check || d.game_over || d.robot_busy || d.move_count === checkAnnounced) return;
+    checkAnnounced = d.move_count;
+    const el = document.getElementById('check-banner');
+    el.textContent = d.check_white ? '♔ ÉCHEC AU ROI BLANC !' : '♚ ÉCHEC AU ROI NOIR !';
+    el.classList.add('show');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove('show'), 3000);
+    playSound('echec');
 }
 let wasRobotBusy = false;
 
@@ -1180,7 +1164,9 @@ function pollStatus() {
         if (d.moves) renderMoveHistory(d.moves);
 
         // Son de fin de coup : le robot vient de finir de bouger et c'est au joueur
+        if (d.sound_cfg) { RobotSounds.set(d.sound_cfg); }
         if (d.sound !== undefined && d.sound !== soundOn) { soundOn = d.sound; setSoundButton(); }
+        announceCheck(d);
         if (wasRobotBusy && !d.robot_busy && !d.robot_turn && !d.game_over && d.startup_state === 'pret') {
             playSound('coup');
         }

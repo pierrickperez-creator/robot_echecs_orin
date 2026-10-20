@@ -82,6 +82,9 @@ settings = {
     "z_feed": config.Z_MAX_FEED,                 # mm/s, vitesse max de l'axe Z
     "xy_feed": round(config.FEED_TRAVEL / 60),   # mm/s, déplacements horizontaux
     "sound": True,                               # sons de fin de coup / fin de partie
+    "volume": 0.8,                               # 0 à 1
+    "move_sound": "carillon",                    # son de fin de coup du robot (page Manuel)
+    "check_sound": "alerte",                     # son de l'échec au roi
 }
 
 
@@ -1473,6 +1476,10 @@ def api_status():
         'moves': moves,
         'robot_busy': robot_busy.locked(),
         'sound': settings['sound'],
+        'sound_cfg': {'on': settings['sound'], 'volume': settings['volume'],
+                      'move': settings['move_sound'], 'check': settings['check_sound']},
+        'check': game_engine.board.is_check(),
+        'check_white': game_engine.board.turn == chess.WHITE,
         'coach': sorted(coach_log, key=lambda g: g['ply'])[-30:] if coach_mode else None,
         'retry': (None if retry_state is None else {
             'msg': status_msg, 'can_retry': bool(retry_state['not_picked'])}),
@@ -2287,6 +2294,11 @@ def api_settings():
             settings['xy_feed'] = max(20.0, min(150.0, float(data['xy_feed'])))
         if 'sound' in data:
             settings['sound'] = bool(data['sound'])
+        if 'volume' in data:
+            settings['volume'] = max(0.0, min(1.0, float(data['volume'])))
+        for key in ('move_sound', 'check_sound'):
+            if key in data and str(data[key]).isidentifier():
+                settings[key] = str(data[key])
         save_settings()
         if 'z_feed' in data:
             apply_motion_settings()
