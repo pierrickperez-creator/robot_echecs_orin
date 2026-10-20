@@ -62,22 +62,32 @@ def grid_xy(c, r):
 
 # Emplacements exprimés en cellules (colonne, rangée) de la grille 10x10 : a1 = (1, 1).
 # Les coordonnées mm en sont déduites (calibration des prises si elle existe, sinon grid_xy).
+# Cellules occupées par les attaches parisiennes qui tiennent le plateau (sous les colonnes a et h,
+# en bas et en haut) : jamais de pièce dessus.
+CLIP_CELLS = [(1, 0), (8, 0), (1, 9), (8, 9)]
+
 BLACK_GRAVEYARD_CELLS = []
 WHITE_GRAVEYARD_CELLS = []
 
 # Zone NOIRE (Bleue) : Haut du plateau (Rangs 5 à 9)
 for r in range(5, 10): BLACK_GRAVEYARD_CELLS.append((0, r)) # Gauche
-for c in range(1, 9): BLACK_GRAVEYARD_CELLS.append((c, 9))  # Haut
+for c in range(1, 9):                                         # Haut (sauf attaches)
+    if (c, 9) not in CLIP_CELLS: BLACK_GRAVEYARD_CELLS.append((c, 9))
 for r in range(9, 4, -1): BLACK_GRAVEYARD_CELLS.append((9, r)) # Droite
 
 # Zone BLANCHE (Verte) : Bas du plateau (Rangs 4 à 0)
 for r in range(4, -1, -1): WHITE_GRAVEYARD_CELLS.append((0, r)) # Gauche
-for c in range(1, 9): WHITE_GRAVEYARD_CELLS.append((c, 0))  # Bas
+for c in range(1, 9):                                         # Bas (sauf attaches)
+    if (c, 0) not in CLIP_CELLS: WHITE_GRAVEYARD_CELLS.append((c, 0))
 for r in range(0, 5): WHITE_GRAVEYARD_CELLS.append((9, r))  # Droite
 
 # Réserves Dames (1 dame par couleur — cases I4 et I5, colonne droite)
 WHITE_QUEEN_RESERVE_CELLS = [(9, 4)]   # I4 : colonne droite, rang 4 (zone blanche)
 BLACK_QUEEN_RESERVE_CELLS = [(9, 5)]   # I5 : colonne droite, rang 5 (zone noire)
+
+# Les cases des dames de réserve ne servent pas de cimetière
+WHITE_GRAVEYARD_CELLS = [c for c in WHITE_GRAVEYARD_CELLS if c not in WHITE_QUEEN_RESERVE_CELLS + BLACK_QUEEN_RESERVE_CELLS]
+BLACK_GRAVEYARD_CELLS = [c for c in BLACK_GRAVEYARD_CELLS if c not in WHITE_QUEEN_RESERVE_CELLS + BLACK_QUEEN_RESERVE_CELLS]
 
 # Compatibilité : mêmes emplacements en mm théoriques
 BLACK_GRAVEYARD = [grid_xy(c, r) for c, r in BLACK_GRAVEYARD_CELLS]

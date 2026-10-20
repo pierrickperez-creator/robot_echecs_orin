@@ -176,9 +176,18 @@ def move_to_vision_position():
     move_xyz(config.VISION_X, config.VISION_Y, config.Z_VISION)
 
 
+class NotHomed(RuntimeError):
+    pass
+
+
 def move_xyz(x, y, z, feed=None):
     """Déplacement absolu avec attente de fin de mouvement."""
     global last_position
+    if not homed and not config.SIMULATION_MODE:
+        # Sans homing, Marlin ne sait pas où est la tête : un déplacement absolu peut
+        # l'envoyer au-delà de la course (courroie sautée le 20/10).
+        log_gcode(f"⛔ Déplacement X{x:.0f} Y{y:.0f} Z{z:.0f} refusé : homing non fait")
+        raise NotHomed("Homing non fait : touchez DÉMARRER LE ROBOT")
     z_max = getattr(config, 'Z_MAX_SAFE', None)
     if z_max is not None and z > z_max:
         log_gcode(f"⚠️ Z{z:.1f} demandé, limité à Z{z_max:.1f} (butée haute)")
@@ -823,23 +832,36 @@ def reconstruct_capture_order():
     return graveyard_contents(game_engine.board)
 
 
-def physical_occupancy(board):
+def physical_occupancy(board, counts=None):
     """
     Emplacements occupés (mm) pour la position `board` : cases de l'échiquier,
-    cimetières (dans l'ordre des captures) et dames de réserve encore en place.
+    cimetières et dames de réserve encore en place.
+    counts = (nb cimetière blanc, nb cimetière noir, dames blanches utilisées, dames noires)
+    (registre de la partie) ; à défaut, déduits de l'historique de `board`.
     """
     import chess as chess_lib
     occ = [calculate_xy(chess_lib.square_name(sq)) for sq in board.piece_map()]
-    w_types, b_types = graveyard_contents(board)
-    occ += [graveyard_xy(True, i) for i in range(len(w_types))]
-    occ += [graveyard_xy(False, i) for i in range(len(b_types))]
-    wq, bq = queens_used(board)
+    if counts is None:
+        w_types, b_types = graveyard_contents(board)
+        wq, bq = queens_used(board)
+        counts = (len(w_types), len(b_types), wq, bq)
+    nw, nb, wq, bq = counts
+    occ += [graveyard_xy(True, i) for i in range(nw)]
+    occ += [graveyard_xy(False, i) for i in range(nb)]
     occ += [grid_to_xy(*c) for c in config.WHITE_QUEEN_RESERVE_CELLS[wq:]]
     occ += [grid_to_xy(*c) for c in config.BLACK_QUEEN_RESERVE_CELLS[bq:]]
     return occ
 
 
-def perform_physical_move(board_before, move):
+def game_counts():
+    """Compteurs du registre de la partie : (cimetière blanc, noir, dames blanches, noires)."""
+    import chess as chess_lib
+    e = game_engine
+    return (len(e.graveyard[chess_lib.WHITE]), len(e.graveyard[chess_lib.BLACK]),
+            e.reserve_used(chess_lib.WHITE), e.reserve_used(chess_lib.BLACK))
+
+
+def perform_physical_move(board_before, move, counts=None):
     """
     Exécute physiquement `move` à partir de la position `board_before`
     (position AVANT le coup — passer une copie).
@@ -853,9 +875,12 @@ def perform_physical_move(board_before, move):
     src_sq, dst_sq = uci_move[:2], uci_move[2:4]
     src_x, src_y = calculate_xy(src_sq)
     dst_x, dst_y = calculate_xy(dst_sq)
-    w_types, b_types = graveyard_contents(board)
-    w_used = {chess_lib.WHITE: len(w_types), chess_lib.BLACK: len(b_types)}
-    occupied = physical_occupancy(board)
+    if counts is None:   # parties légendaires : historique complet, jamais corrigé
+        w_types, b_types = graveyard_contents(board)
+        wq_, bq_ = queens_used(board)
+        counts = (len(w_types), len(b_types), wq_, bq_)
+    w_used = {chess_lib.WHITE: counts[0], chess_lib.BLACK: counts[1]}
+    occupied = physical_occupancy(board, counts)
 
     def to_graveyard(x, y, color, ptype):
         gx, gy = graveyard_xy(color == chess_lib.WHITE, w_used[color])
@@ -878,8 +903,7 @@ def perform_physical_move(board_before, move):
     if move.promotion:
         to_graveyard(src_x, src_y, board.turn, 'p')
         reserve = config.WHITE_QUEEN_RESERVE_CELLS if board.turn == chess_lib.WHITE else config.BLACK_QUEEN_RESERVE_CELLS
-        wq, bq = queens_used(board)
-        used_idx = wq if board.turn == chess_lib.WHITE else bq
+        used_idx = counts[2] if board.turn == chess_lib.WHITE else counts[3]
         if used_idx < len(reserve):
             qx, qy = reserve_xy(board.turn == chess_lib.WHITE, used_idx)
             move_piece(qx, qy, dst_x, dst_y, 'q', occupied)
@@ -900,13 +924,13 @@ def perform_physical_move(board_before, move):
 
 robot_busy = threading.Lock()   # un seul coup robot à la fois (double appui écran)
 
-def execute_move_sequence(board_before, move):
+def execute_move_sequence(board_before, move, counts=None):
     """Thread : joue physiquement le coup du robot puis revient en position caméra."""
     global status_msg
     try:
         status_msg = f"Déplacement {move.uci()}..."
         try:
-            perform_physical_move(board_before, move)
+            perform_physical_move(board_before, move, counts)
         except PickNotCalibrated as e:
             log_gcode(f"⛔ {e}")
             status_msg = f"Robot : {move.uci()} — déplacez la pièce à la main ({e})"
@@ -957,7 +981,8 @@ def reset_board_physically():
     }
 
     # --- Reconstruire les types dans le cimetière ---
-    w_grave_types, b_grave_types = reconstruct_capture_order()
+    w_grave_types = game_engine.graveyard_types(chess_lib.WHITE)
+    b_grave_types = game_engine.graveyard_types(chess_lib.BLACK)
 
     # --- Phase 1 : Garer les pièces de l'échiquier dans le cimetière ---
     # On les place dans les slots APRÈS les pièces déjà capturées
@@ -965,7 +990,7 @@ def reset_board_physically():
     park_b = []  # pour les noirs
     w_park_idx = len(w_grave_types)
     b_park_idx = len(b_grave_types)
-    occupied = physical_occupancy(game_engine.board)
+    occupied = physical_occupancy(game_engine.board, game_counts())
 
     for sq in chess_lib.SQUARES:
         piece = game_engine.board.piece_at(sq)
@@ -1047,6 +1072,11 @@ def _reset_board_thread():
 # =============================================================================
 # ROUTES FLASK — STREAMING CAMÉRA
 # =============================================================================
+
+@app.errorhandler(NotHomed)
+def _not_homed(e):
+    return jsonify({"status": "error", "msg": str(e)}), 400
+
 
 @app.route('/')
 def index():
@@ -1163,7 +1193,7 @@ def api_status():
     outcome = game_engine.board.outcome()
     # Calculs sur l'historique : ne doivent jamais bloquer l'écran de jeu
     try:
-        wq, bq = queens_used(game_engine.board)
+        wq, bq = game_engine.reserve_used(chess.WHITE), game_engine.reserve_used(chess.BLACK)
         moves = _build_move_history()
     except Exception as e:
         log_gcode(f"⚠️ Historique illisible : {e}")
@@ -1269,8 +1299,13 @@ def _prepare_new_game():
     if not robot_busy.acquire(timeout=120):
         return
     try:
+        if not homed and not config.SIMULATION_MODE:
+            log_gcode("Nouvelle partie : homing non fait, la tête ne bouge pas.")
+            return
         move_to_vision_position()
         capture_reference()
+    except NotHomed:
+        pass
     finally:
         robot_busy.release()
 
@@ -1463,9 +1498,10 @@ def start_robot_reply():
         status_msg = "Erreur IA."
         return None
     board_before = game_engine.board.copy()
-    game_engine.board.push(move)
+    counts = game_counts()           # état du cimetière AVANT ce coup
+    game_engine.push_move(move)      # inscrit la pièce prise au registre
     # L'horloge du joueur ne démarre qu'une fois le robot revenu en position (execute_move_sequence)
-    threading.Thread(target=execute_move_sequence, args=(board_before, move), daemon=True).start()
+    threading.Thread(target=execute_move_sequence, args=(board_before, move, counts), daemon=True).start()
     return move
 
 
@@ -1521,7 +1557,7 @@ def api_validate_move():
             return jsonify({"status": "manual", "msg": f"{why} Indiquez votre coup à l'écran."})
 
     san = game_engine.board.san(move)
-    game_engine.board.push(move)
+    game_engine.push_move(move)      # une pièce prise par le joueur va au cimetière (registre)
     game_engine.start_clock(game_engine.board.turn)   # le temps du robot court : réflexion + mouvements
     log_gcode(f"JOUEUR JOUE : {move.uci()} ({san}, {source})")
     if game_engine.is_game_over():

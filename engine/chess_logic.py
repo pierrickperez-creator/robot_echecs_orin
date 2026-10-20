@@ -11,7 +11,7 @@ class ChessEngine:
         self.engine = None
         
         # --- Horloge ---
-        self.initial_time = 10 * 60 # 10 minutes en secondes par défaut
+        self.initial_time = 20 * 60 # 20 minutes par joueur par défaut
         self.time_white = self.initial_time
         self.time_black = self.initial_time
         self.last_tick = time.time()
@@ -21,6 +21,7 @@ class ChessEngine:
         # --- Compteurs de Dames de réserve utilisées ---
         self.used_white_queens = 0
         self.used_black_queens = 0
+        self._clear_registry()
 
         try:
             self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
@@ -83,6 +84,41 @@ class ChessEngine:
         except Exception as e:
             print(f"[ERREUR] Réglage Elo impossible : {e}")
 
+    def _clear_registry(self):
+        """
+        Registre physique, indépendant de l'historique des coups (que python-chess
+        efface à chaque correction MODIFIER PIÈCE) :
+          graveyard[couleur] = [(demi-coup, type de pièce), ...] dans l'ordre des emplacements
+          reserve[couleur]   = [demi-coup, ...] dames de réserve utilisées (promotions)
+        """
+        self.ply = 0
+        self.graveyard = {chess.WHITE: [], chess.BLACK: []}
+        self.reserve = {chess.WHITE: [], chess.BLACK: []}
+
+    def register_move(self, move):
+        """À appeler AVANT de jouer `move` : note les pièces qui partent au cimetière."""
+        b = self.board
+        captured = b.piece_at(move.to_square)
+        if b.is_en_passant(move):
+            captured = chess.Piece(chess.PAWN, not b.turn)
+        if captured is not None:
+            self.graveyard[captured.color].append((self.ply, captured.piece_type))
+        if move.promotion:
+            self.graveyard[b.turn].append((self.ply, chess.PAWN))   # le pion promu sort du plateau
+            self.reserve[b.turn].append(self.ply)
+
+    def push_move(self, move):
+        """Joue `move` en tenant le registre à jour."""
+        self.register_move(move)
+        self.board.push(move)
+        self.ply += 1
+
+    def graveyard_types(self, color):
+        return [t for _, t in self.graveyard[color]]
+
+    def reserve_used(self, color):
+        return len(self.reserve[color])
+
     def reset(self):
         self.board.reset()
         self.time_white = self.initial_time
@@ -91,19 +127,23 @@ class ChessEngine:
         self.clock_side = None
         self.used_white_queens = 0
         self.used_black_queens = 0
+        self._clear_registry()
 
     def undo(self):
         # Annule jusqu'au tour du joueur
-        if len(self.board.move_stack) >= 2:
-            self.board.pop(); self.board.pop()
-        elif len(self.board.move_stack) == 1:
+        n = min(2, len(self.board.move_stack))
+        for _ in range(n):
             self.board.pop()
+        self.ply = max(0, self.ply - n)
+        for c in (chess.WHITE, chess.BLACK):
+            self.graveyard[c] = [e for e in self.graveyard[c] if e[0] < self.ply]
+            self.reserve[c] = [p for p in self.reserve[c] if p < self.ply]
 
     def push_uci(self, uci):
         try:
             move = chess.Move.from_uci(uci)
             if move in self.board.legal_moves:
-                self.board.push(move)
+                self.push_move(move)
                 return True
         except: pass
         return False
