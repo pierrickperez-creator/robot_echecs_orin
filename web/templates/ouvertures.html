@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ouvertures — Robot Échecs</title>
+<style>
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; background: #111; color: #ddd; font-family: sans-serif;
+           display: flex; flex-direction: column; overflow: hidden; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px;
+             background: #161616; border-bottom: 1px solid #2a2a2a; }
+    header h1 { margin: 0; font-size: 20px; color: #f1c40f; }
+    header a { color: #ddd; text-decoration: none; background: #2c3e50; padding: 8px 14px;
+               border-radius: 8px; font-size: 14px; }
+    main { flex: 1; display: flex; min-height: 0; }
+    #board-zone { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 10px; }
+    #board { width: min(calc(100vh - 80px), 56vw); height: min(calc(100vh - 80px), 56vw); cursor: pointer; }
+    #side { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; min-height: 0; }
+    #list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+    #msg { padding: 12px; border-radius: 10px; background: #1c2833; font-size: 17px; font-weight: bold;
+           text-align: center; min-height: 48px; }
+    #idea { font-size: 13px; color: #aaa; text-align: center; min-height: 18px; }
+    #progress { height: 8px; background: #222; border-radius: 4px; overflow: hidden; }
+    #progress div { height: 100%; width: 0; background: #27ae60; transition: width .3s; }
+    .row { display: flex; gap: 8px; }
+    button { flex: 1; padding: 14px; border: 0; border-radius: 8px; font-size: 15px; font-weight: bold;
+             color: #fff; cursor: pointer; }
+    .op { background: #1f2a33; border: 1px solid #2c3e50; border-radius: 9px; padding: 10px 12px;
+          cursor: pointer; text-align: left; }
+    .op.active { border-color: #27ae60; background: #17301f; }
+    .op b { color: #eee; font-size: 15px; }
+    .op small { display: block; color: #888; margin-top: 2px; font-weight: normal; }
+    .tag { float: right; font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+    .tag.white { background: #eee; color: #222; } .tag.black { background: #333; color: #eee; }
+</style>
+</head>
+<body>
+<header>
+    <h1>📖 Exercices d'ouvertures</h1>
+    <a href="/progresser">← Retour à Progresser</a>
+</header>
+<main>
+    <div id="board-zone"><img id="board" src="/op/board.svg" onclick="onBoard(event)" alt="échiquier"></div>
+    <div id="side">
+        <div id="msg">Choisissez une ouverture</div>
+        <div id="idea"></div>
+        <div id="progress"><div></div></div>
+        <div class="row">
+            <button style="background:#8e44ad" onclick="hint()">💡 Indice</button>
+            <button style="background:#2980b9" onclick="restart()">↺ Recommencer</button>
+        </div>
+        <div id="list"></div>
+    </div>
+</main>
+<script>
+let state = null, sel = '', current = '';
+
+function refresh() {
+    document.getElementById('board').src = '/op/board.svg?t=' + Date.now() + (sel ? '&sel=' + sel : '');
+}
+function show(d) {
+    state = d;
+    document.getElementById('idea').textContent = d.idea || '';
+    document.getElementById('progress').firstElementChild.style.width =
+        (d.total ? 100 * d.progress / d.total : 0) + '%';
+    refresh();
+}
+function msg(text, color) {
+    const m = document.getElementById('msg');
+    m.innerHTML = text; m.style.color = color || '#ddd';
+}
+function start(id) {
+    current = id; sel = '';
+    document.querySelectorAll('.op').forEach(e => e.classList.toggle('active', e.dataset.id === id));
+    fetch('/api/op/start', {method:'POST', headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({id})})
+    .then(r => r.json()).then(d => {
+        show(d);
+        const you = d.side === 'white' ? 'les Blancs' : 'les Noirs';
+        msg(`${d.name} : vous jouez ${you}.` + (d.replies.length ? `<br>L'adversaire a joué ${d.replies.join(' ')}. À vous !` : ' À vous !'));
+    });
+}
+function restart() { if (current) start(current); }
+function hint() {
+    if (!current) return;
+    fetch('/api/op/hint', {method:'POST'}).then(r => r.json()).then(d => { if (d.hint) msg('💡 ' + d.hint, '#d7bde2'); });
+}
+// Case touchée, en tenant compte du plateau retourné quand on joue les Noirs
+function squareAt(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    let f = Math.floor((event.clientX - rect.left) / (rect.width / 8));
+    let r = 7 - Math.floor((event.clientY - rect.top) / (rect.height / 8));
+    if (state && state.side === 'black') { f = 7 - f; r = 7 - r; }
+    if (f < 0 || f > 7 || r < 0 || r > 7) return '';
+    return String.fromCharCode(97 + f) + (r + 1);
+}
+function onBoard(event) {
+    if (!state || state.finished) return;
+    const sq = squareAt(event);
+    if (!sq) return;
+    if (sel && state.legal_moves.some(m => m.startsWith(sel + sq))) {
+        const uci = sel + sq; sel = '';
+        fetch('/api/op/move', {method:'POST', headers:{'Content-Type':'application/json'},
+                               body: JSON.stringify({uci})})
+        .then(r => r.json()).then(d => {
+            show(d);
+            if (d.result === 'correct') {
+                if (d.finished) msg(`🏆 Bravo ! ${d.san} — vous connaissez la ligne de la ${d.name} !`, '#2ecc71');
+                else msg(`✅ ${d.san} : bien joué !` + (d.replies.length ? ` L'adversaire répond ${d.replies.join(' ')}.` : ''), '#2ecc71');
+            } else if (d.result === 'wrong') {
+                msg(`❌ ${d.tried} n'est pas le coup de cette ouverture. Réessayez.` +
+                    (d.hint ? `<br>💡 ${d.hint}` : ''), '#e67e22');
+            }
+        });
+        return;
+    }
+    sel = state.legal_moves.some(m => m.startsWith(sq)) ? sq : '';
+    refresh();
+}
+fetch('/api/op/list').then(r => r.json()).then(list => {
+    document.getElementById('list').innerHTML = list.map(o =>
+        `<div class="op" data-id="${o.id}" onclick="start('${o.id}')">` +
+        `<span class="tag ${o.side}">${o.side === 'white' ? 'Blancs' : 'Noirs'}</span>` +
+        `<b>${o.name}</b><small>${o.idea}</small></div>`).join('');
+});
+
+// Rechargement automatique après une mise à jour du serveur
+(function () {
+    let v0 = null;
+    setInterval(() => {
+        fetch('/api/version').then(r => r.json()).then(d => {
+            if (v0 === null) v0 = d.version;
+            else if (d.version !== v0) location.reload();
+        }).catch(() => {});
+    }, 5000);
+})();
+</script>
+</body>
+</html>

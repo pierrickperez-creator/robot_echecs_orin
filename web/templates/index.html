@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Robot Échecs</title>
+    <title>{% if coach %}Progresser — {% endif %}Robot Échecs</title>
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white;
@@ -186,6 +186,17 @@
             50%      { box-shadow: 0 0 28px #3498dbff; }
         }
         #safety-banner.info { background: #123a5a; border-color: #3498db; color: #aed6f1; animation: none; }
+
+        /* Coach (page Progresser) */
+        #coach-box { background: #10202c; border: 2px solid #2980b9; border-radius: 10px; padding: 10px 12px; }
+        #coach-last { font-size: 20px; font-weight: bold; text-align: center; min-height: 28px; }
+        #coach-best { font-size: 14px; text-align: center; color: #aed6f1; min-height: 18px; margin-top: 2px; }
+        #coach-sum  { font-size: 12px; text-align: center; color: #888; margin-top: 4px; }
+        #coach-list { font-family: 'Courier New', monospace; font-size: 13px; max-height: 120px;
+                      overflow-y: auto; margin-top: 6px; line-height: 1.6; }
+        .coach-head { display: flex; justify-content: space-between; align-items: center;
+                      font-size: 12px; color: #5dade2; margin-bottom: 6px; }
+        .coach-head a { color: #f1c40f; text-decoration: none; font-weight: bold; }
 
         /* Démarrage (homing) */
         #startup-modal {
@@ -387,6 +398,7 @@
                 <a class="nav-btn" href="/simulation">♟ Simulation</a>
                 <a class="nav-btn" href="/legendaires">★ Légendaires</a>
                 <a class="nav-btn" href="/controle_manuel">🎮 Manuel</a>
+                {% if coach %}<a class="nav-btn" href="/">♟ Partie</a>{% else %}<a class="nav-btn" href="/progresser">🎓 Progresser</a>{% endif %}
                 <button class="nav-btn" id="sound-btn" onclick="toggleSound()" title="Sons">🔊</button>
             </div>
         </div>
@@ -394,6 +406,19 @@
         <div class="panel-body">
 
             <div class="status-bar" id="status">SYSTÈME PRÊT</div>
+            {% if coach %}
+            <!-- Coach : appréciation de chaque coup du joueur -->
+            <div id="coach-box">
+                <div class="coach-head">
+                    <span>🎓 PROGRESSER — analyse de vos coups</span>
+                    <a href="/progresser/ouvertures">📖 Exercices d'ouvertures</a>
+                </div>
+                <div id="coach-last">Lancez une NOUVELLE PARTIE depuis cette page</div>
+                <div id="coach-best"></div>
+                <div id="coach-sum"></div>
+                <div id="coach-list"></div>
+            </div>
+            {% endif %}
 
             <!-- Horloges -->
             <div>
@@ -726,6 +751,35 @@ function validateMove(uci) {
     }).finally(()=>{ actionPending = false; pollStatus(); });
 }
 
+// ─── Coach (page Progresser) ──────────────────────────────────────────────
+const COACH = {{ 'true' if coach else 'false' }};
+let coachCount = -1;
+function renderCoach(list) {
+    if (!list || list.length === coachCount) return;
+    coachCount = list.length;
+    const last = document.getElementById('coach-last');
+    const best = document.getElementById('coach-best');
+    if (!list.length) {
+        last.textContent = 'À vous : chaque coup sera analysé'; last.style.color = '#ddd';
+        best.textContent = ''; document.getElementById('coach-sum').textContent = '';
+        document.getElementById('coach-list').innerHTML = '';
+        return;
+    }
+    const g = list[list.length - 1];
+    last.innerHTML = `${g.num}. ${g.san} <span style="color:${g.color}">${g.symbol} ${g.label}</span>`;
+    best.textContent = g.best_san ? `Meilleur coup : ${g.best_san}` : '';
+    const counts = {};
+    list.forEach(x => counts[x.label] = (counts[x.label] || 0) + 1);
+    document.getElementById('coach-sum').textContent =
+        ['Meilleur coup', 'Excellent', 'Bon', 'Imprécision', 'Erreur', 'Gaffe']
+            .filter(k => counts[k]).map(k => `${k} : ${counts[k]}`).join(' · ');
+    const el = document.getElementById('coach-list');
+    el.innerHTML = list.slice().reverse().map(x =>
+        `<div>${x.num}. ${x.san} <span style="color:${x.color}">${x.symbol} ${x.label}</span>` +
+        (x.best_san ? ` <span style="color:#777">(mieux : ${x.best_san})</span>` : '') + `</div>`).join('');
+    if (g.label === 'Gaffe' || g.label === 'Erreur') playSound('nulle');
+}
+
 // ─── Sons (haut-parleurs de l'écran) ──────────────────────────────────────
 let soundOn = true;
 let audioCtx = null;
@@ -926,7 +980,7 @@ function startGameWithColor(humanPlaysWhite) {
     fetch('/api/set_color', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({human_plays_white: humanPlaysWhite})
+        body: JSON.stringify({human_plays_white: humanPlaysWhite, coach: COACH})
     }).then(r => r.json()).then(d => {
         wasGameOver = false;
         refreshBoard();
@@ -1134,6 +1188,7 @@ function pollStatus() {
 
         // Bouton principal : J'AI JOUÉ / JOUER ROBOT / robot en action
         updateMainButton(d);
+        if (COACH) renderCoach(d.coach || []);
         updateStartup(d);
 
         // Célébration fin de partie

@@ -32,6 +32,7 @@ try:
     import config
     from engine.chess_logic import ChessEngine
     from engine.vision_engine import VisionEngine
+    from engine.coach import Coach, OpeningTrainer, OPENINGS, fr_san
     print("✅ Moteurs et Configuration chargés avec succès.")
 except ImportError as e:
     print(f"❌ Erreur critique : {e}")
@@ -1238,7 +1239,101 @@ def _not_homed(e):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', coach=False)
+
+
+@app.route('/progresser')
+def progresser():
+    """Partie normale avec le robot + analyse de chaque coup du joueur."""
+    return render_template('index.html', coach=True)
+
+
+@app.route('/progresser/ouvertures')
+def ouvertures():
+    return render_template('ouvertures.html')
+
+
+# ── Coach (page Progresser) ───────────────────────────────────────────────────
+coach = Coach()
+coach_mode = False        # partie lancée depuis la page Progresser
+coach_log = []            # appréciations des coups du joueur, dans l'ordre
+
+
+def coach_grade_async(board_before, move, ply):
+    """Analyse en parallèle : ne retarde pas la réponse du robot."""
+    def run():
+        try:
+            g = coach.grade(board_before, move)
+            g["ply"] = ply
+            g["num"] = board_before.fullmove_number
+            coach_log.append(g)
+            log_gcode(f"🎓 {g['san']} : {g['label']}" + (f" (meilleur : {g['best_san']})" if g['best_san'] else ""))
+        except Exception as e:
+            log_gcode(f"Analyse du coup impossible : {e}")
+    threading.Thread(target=run, daemon=True).start()
+
+
+# ── Exercices d'ouvertures ────────────────────────────────────────────────────
+trainer = OpeningTrainer()
+
+
+@app.route('/api/op/list')
+def api_op_list():
+    return jsonify([{"id": o["id"], "name": o["name"], "side": o["side"], "idea": o["idea"]} for o in OPENINGS])
+
+
+def _op_state(**extra):
+    return jsonify({"status": "ok", "fen": trainer.board.fen(),
+                    "side": trainer.op["side"] if trainer.op else "white",
+                    "name": trainer.op["name"] if trainer.op else "",
+                    "idea": trainer.op["idea"] if trainer.op else "",
+                    "progress": trainer.idx, "total": len(trainer.op["moves"]) if trainer.op else 0,
+                    "finished": trainer.finished(),
+                    "legal_moves": [m.uci() for m in trainer.board.legal_moves], **extra})
+
+
+@app.route('/api/op/start', methods=['POST'])
+def api_op_start():
+    if not trainer.start((request.get_json(silent=True) or {}).get('id', '')):
+        return jsonify({"status": "error", "msg": "Ouverture inconnue"}), 404
+    # Coups joués d'office par l'adversaire avant le premier coup du joueur (ex. 1.e4 pour les noirs)
+    tmp, replies = chess.Board(), []
+    for m in trainer.board.move_stack:
+        replies.append(fr_san(tmp.san(m)))
+        tmp.push(m)
+    return _op_state(replies=replies)
+
+
+@app.route('/api/op/move', methods=['POST'])
+def api_op_move():
+    result, info = trainer.try_move((request.get_json(silent=True) or {}).get('uci', ''))
+    return _op_state(result=result, **info)
+
+
+@app.route('/api/op/hint', methods=['POST'])
+def api_op_hint():
+    return _op_state(hint=trainer.hint())
+
+
+@app.route('/op/board.svg')
+def op_board_svg():
+    import chess.svg
+    b = trainer.board
+    fill = {}
+    sel = request.args.get('sel')
+    if sel:
+        try:
+            sq = chess.parse_square(sel)
+            fill[sq] = "#aaffaa"
+            for m in b.legal_moves:
+                if m.from_square == sq:
+                    fill[m.to_square] = "#ffff88"
+        except ValueError:
+            pass
+    last = b.peek() if b.move_stack else None
+    flipped = bool(trainer.op and trainer.op["side"] == "black")
+    svg = chess.svg.board(b, lastmove=last, fill=fill, coordinates=False, size=480, flipped=flipped)
+    return Response(svg, mimetype='image/svg+xml')
 
 
 @app.route('/video_feed')
@@ -1378,6 +1473,7 @@ def api_status():
         'moves': moves,
         'robot_busy': robot_busy.locked(),
         'sound': settings['sound'],
+        'coach': sorted(coach_log, key=lambda g: g['ply'])[-30:] if coach_mode else None,
         'retry': (None if retry_state is None else {
             'msg': status_msg, 'can_retry': bool(retry_state['not_picked'])}),
         'clock_side': (None if not game_engine.clock_running else
@@ -1409,6 +1505,7 @@ def _build_move_history():
 def api_undo():
     """Annule le dernier coup (humain + robot)."""
     game_engine.undo()
+    coach_log[:] = [g for g in coach_log if g['ply'] < game_engine.ply]
     vision_engine.reference_frame = None   # plateau remis à la main : reprendre la photo
     log_gcode("ANNULATION du dernier coup — replacez les pièces à la main.")
     return jsonify({"status": "ok", "fen": game_engine.get_fen()})
@@ -1442,6 +1539,9 @@ def api_set_color():
     global status_msg
     human_plays_white = bool(request.json.get('human_plays_white', True))
     config.HUMAN_PLAYS_WHITE = human_plays_white
+    global coach_mode
+    coach_mode = bool(request.json.get('coach', False))
+    coach_log.clear()
     game_engine.reset()
     robot_plays_first = not human_plays_white
     if robot_plays_first:
@@ -1730,6 +1830,8 @@ def api_validate_move():
     else:
         pre_move_frame = grab_stable_frame(2) if vision_ready() else None
     san = game_engine.board.san(move)
+    if coach_mode:
+        coach_grade_async(game_engine.board.copy(stack=False), move, game_engine.ply)
     game_engine.push_move(move)      # une pièce prise par le joueur va au cimetière (registre)
     game_engine.start_clock(game_engine.board.turn)   # le temps du robot court : réflexion + mouvements
     log_gcode(f"JOUEUR JOUE : {move.uci()} ({san}, {source})")
