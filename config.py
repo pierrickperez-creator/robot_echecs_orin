@@ -52,7 +52,7 @@ FEED_TRAVEL    = 4000.0
 Y_MAX_ACCEL    = 250          # mm/s² (firmware : 1000)
 TRAVEL_ACCEL   = 1000         # mm/s² accélération des déplacements (firmware : 3000)
 XY_JERK        = 5            # mm/s  changement de vitesse instantané (firmware : 20)
-Z_MAX_FEED     = 30           # mm/s  vitesse max Z (firmware : 8 ; 14, 18 et 24 validés en partie). Si Z perd des pas, baisser.
+Z_MAX_FEED     = 35           # mm/s  vitesse Z par défaut (réglable page Manuel ; 30 validé en partie). Si Z perd des pas, baisser.
 Z_MAX_ACCEL    = 300          # mm/s² accélération Z (firmware : 20 ; 80, 120 et 200 validés en partie)
 FEED_Z         = 1000.0
 
@@ -135,6 +135,7 @@ BOARD_CORNERS = None          # Sera calibré avec les 4 dames noires
 VISION_CALIB_SQUARES = True    # False = anciennes marques au centre des 4 cases d'angle de la grille 10x10
 VISION_DIFF_THRESHOLD = 18     # Écart moyen (0-255) au-delà duquel une case est "modifiée"
 VISION_SETTLE_SEC     = 1.0    # Pause après arrivée en position caméra (vibrations) avant la photo
+LEG_VERIFY            = True   # Parties légendaires : photo après chaque coup pour vérifier la prise
 # Orientation : si les noms de cases de l'image de debug ne collent pas au vrai plateau
 VISION_FLIP_FILES = False      # inverse a↔h
 VISION_FLIP_RANKS = True       # inverse 1↔8 (caméra montée : rangée 1 en bas de l'image)

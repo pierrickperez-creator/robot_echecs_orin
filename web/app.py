@@ -76,6 +76,41 @@ def find_marlin_port():
             return found[0]
     return config.MARLIN_PORT
 
+SETTINGS_FILE = os.path.join(parent_dir, "robot_settings.json")
+settings = {
+    "z_feed": config.Z_MAX_FEED,                 # mm/s, vitesse max de l'axe Z
+    "xy_feed": round(config.FEED_TRAVEL / 60),   # mm/s, déplacements horizontaux
+    "sound": True,                               # sons de fin de coup / fin de partie
+}
+
+
+def load_settings():
+    import json
+    try:
+        with open(SETTINGS_FILE) as f:
+            settings.update(json.load(f))
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"⚠️ Réglages illisibles : {e}")
+
+
+def save_settings():
+    import json
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, indent=2)
+
+
+def apply_motion_settings():
+    """Envoie à Marlin la vitesse Z (accélération proportionnelle) — non sauvegardé dans la carte."""
+    z = float(settings["z_feed"])
+    send_gcode_raw(f"M203 Z{z:g}")
+    send_gcode_raw(f"M201 Z{int(z * 10)}")
+
+
+load_settings()
+
+
 def init_printer():
     global ser
     if config.SIMULATION_MODE:
@@ -103,8 +138,7 @@ def init_printer():
         send_gcode_raw(f"M205 X{config.XY_JERK}")
         # Axe Z plus rapide (firmware : 8 mm/s, 20 mm/s²) : les montées en position caméra
         # cassaient le rythme de la partie
-        send_gcode_raw(f"M203 Z{config.Z_MAX_FEED}")
-        send_gcode_raw(f"M201 Z{config.Z_MAX_ACCEL}")
+        apply_motion_settings()     # vitesse Z réglable dans la page Manuel
         read_marlin_position()      # Marlin garde ses coordonnées si seul le serveur a redémarré
         restore_homing_state()
         log_gcode(f"✅ Marlin connecté sur {port} — relais OFF")
@@ -194,7 +228,7 @@ def move_xyz(x, y, z, feed=None):
         z = z_max
     last_position = {'x': round(x, 2), 'y': round(y, 2), 'z': round(z, 2)}
     send_gcode_raw("G90")
-    cmd = f"G0 X{x:.2f} Y{y:.2f} Z{z:.2f} F{feed or config.FEED_TRAVEL}"
+    cmd = f"G0 X{x:.2f} Y{y:.2f} Z{z:.2f} F{feed or settings['xy_feed'] * 60}"
     send_gcode_raw(cmd)
     send_gcode_raw("M400")
     if homed:
@@ -930,8 +964,70 @@ def perform_physical_move(board_before, move, counts=None):
 
 robot_busy = threading.Lock()   # un seul coup robot à la fois (double appui écran)
 
-def execute_move_sequence(board_before, move, counts=None):
-    """Thread : joue physiquement le coup du robot puis revient en position caméra."""
+def move_steps(board_before, move):
+    """Déplacements de pièces À VÉRIFIER pour un coup : la pièce jouée, et la tour au roque."""
+    import chess as chess_lib
+    mover = board_before.piece_at(move.from_square)
+    steps = [(move.from_square, move.to_square,
+              chess_lib.piece_symbol(mover.piece_type) if mover else 'k')]
+    if board_before.is_castling(move):
+        rank = chess_lib.square_rank(move.from_square)
+        king_side = chess_lib.square_file(move.to_square) > chess_lib.square_file(move.from_square)
+        steps.append((chess_lib.square(7 if king_side else 0, rank),
+                      chess_lib.square(5 if king_side else 3, rank), 'r'))
+    return steps
+
+
+def verify_physical_move(pre_frame, board_before, move):
+    """
+    Compare la photo prise avant le coup du robot à une nouvelle photo (tête en position
+    caméra). Une case de départ qui n'a pas changé = pièce pas attrapée.
+    Retourne (pas attrapées [(départ, arrivée, type)], lâchées en route [...]),
+    ou None si la vérification est impossible (pas de caméra, pas de photo d'avant).
+    """
+    if pre_frame is None or not camera.cam_ok or not vision_engine.is_calibrated():
+        return None
+    time.sleep(getattr(config, 'VISION_SETTLE_SEC', 1.0))
+    post = grab_stable_frame()
+    if post is None:
+        return None
+    scores = vision_engine.scores_between(pre_frame, post)
+    if scores is None:
+        return None
+    thr = getattr(config, "VISION_DIFF_THRESHOLD", 18)
+    not_picked, dropped = [], []
+    for src, dst, t in move_steps(board_before, move):
+        captured = board_before.piece_at(dst) is not None
+        if scores[src] < thr:
+            not_picked.append((src, dst, t))
+        elif scores[dst] < thr and not captured:
+            dropped.append((src, dst, t))
+    return not_picked, dropped
+
+
+def retry_steps(steps):
+    """Refait les déplacements ratés (transport en hauteur : l'occupation réelle est incertaine)."""
+    import chess as chess_lib
+    for src, dst, t in steps:
+        (sx, sy) = calculate_xy(chess_lib.square_name(src))
+        (dx, dy) = calculate_xy(chess_lib.square_name(dst))
+        log_gcode(f"🔁 Nouvelle tentative : {PIECE_NAMES[t]} {chess_lib.square_name(src)} → {chess_lib.square_name(dst)}")
+        move_piece(sx, sy, dx, dy, t)
+
+
+def describe_failure(not_picked, dropped):
+    import chess as chess_lib
+    parts = [f"{PIECE_NAMES[t]} {chess_lib.square_name(a)} pas attrapé(e)" for a, b, t in not_picked]
+    parts += [f"{PIECE_NAMES[t]} pas posé(e) en {chess_lib.square_name(b)}" for a, b, t in dropped]
+    return ", ".join(parts)
+
+
+pre_move_frame = None     # photo du plateau juste avant le coup du robot
+retry_state = None        # prise ratée en attente : {board_before, move, pre_frame, not_picked, dropped}
+
+
+def execute_move_sequence(board_before, move, counts=None, pre_frame=None):
+    """Thread : joue physiquement le coup du robot, revient en position caméra et vérifie."""
     global status_msg
     try:
         status_msg = f"Déplacement {move.uci()}..."
@@ -940,18 +1036,41 @@ def execute_move_sequence(board_before, move, counts=None):
         except PickNotCalibrated as e:
             log_gcode(f"⛔ {e}")
             status_msg = f"Robot : {move.uci()} — déplacez la pièce à la main ({e})"
+            game_engine.start_clock(game_engine.board.turn)
             return
         log_gcode(f"ROBOT JOUE : {move.uci()}")
         move_to_vision_position()
-        capture_reference()
-        if game_engine.is_game_over():
-            status_msg = f"Robot a joué {move.uci()}. Partie terminée !"
-        else:
-            status_msg = f"Robot a joué {move.uci()}. À vous : jouez puis appuyez sur J'AI JOUÉ."
+        if not _check_robot_move(board_before, move, pre_frame):
+            return      # prise ratée : on attend « Réessayer » ou « C'est réglé »
+        _finish_robot_turn(move)
     finally:
-        if not game_engine.is_game_over():
-            game_engine.start_clock(game_engine.board.turn)   # au joueur, une fois le robot revenu
         robot_busy.release()
+
+
+def _check_robot_move(board_before, move, pre_frame):
+    """Vérifie le coup ; en cas d'échec, mémorise l'état pour « Réessayer ». True si tout va bien."""
+    global retry_state, status_msg
+    res = verify_physical_move(pre_frame, board_before, move)
+    if res is None or (not res[0] and not res[1]):
+        retry_state = None
+        return True
+    not_picked, dropped = res
+    retry_state = {"board_before": board_before, "move": move, "pre_frame": pre_frame,
+                   "not_picked": not_picked, "dropped": dropped}
+    status_msg = "⚠️ Prise ratée : " + describe_failure(not_picked, dropped)
+    log_gcode(status_msg)
+    return False
+
+
+def _finish_robot_turn(move):
+    """Coup du robot terminé et vérifié : photo de référence, message, horloge du joueur."""
+    global status_msg
+    capture_reference()
+    if game_engine.is_game_over():
+        status_msg = f"Robot a joué {move.uci()}. Partie terminée !"
+    else:
+        status_msg = f"Robot a joué {move.uci()}. À vous : jouez puis appuyez sur J'AI JOUÉ."
+        game_engine.start_clock(game_engine.board.turn)   # au joueur, une fois le robot revenu
 
 
 def plan_board_reset(board, grave_w, grave_b, reserve_w_used, reserve_b_used):
@@ -1258,6 +1377,9 @@ def api_status():
         'clock_minutes': round(game_engine.initial_time / 60, 1),
         'moves': moves,
         'robot_busy': robot_busy.locked(),
+        'sound': settings['sound'],
+        'retry': (None if retry_state is None else {
+            'msg': status_msg, 'can_retry': bool(retry_state['not_picked'])}),
         'clock_side': (None if not game_engine.clock_running else
                        ('white' if (game_engine.board.turn if game_engine.clock_side is None
                                     else game_engine.clock_side) else 'black')),
@@ -1326,6 +1448,8 @@ def api_set_color():
         status_msg = "Robot joue les Blancs — retirez vos mains et appuyez sur JOUER ROBOT."
     else:
         status_msg = "Nouvelle partie ! Jouez votre coup puis appuyez sur J'AI JOUÉ."
+    global retry_state
+    retry_state = None
     log_gcode(f"NOUVELLE PARTIE — Humain={'Blancs' if human_plays_white else 'Noirs'}")
     threading.Thread(target=_prepare_new_game, daemon=True).start()
     return jsonify({"status": "ok",
@@ -1518,6 +1642,8 @@ def api_bot_move():
     if not robot_busy.acquire(blocking=False):
         return jsonify({"status": "busy", "msg": "Le robot est déjà en train de jouer."}), 409
     game_engine.start_clock(game_engine.board.turn)   # temps du robot : réflexion + mouvements
+    global pre_move_frame
+    pre_move_frame = grab_stable_frame(2) if vision_ready() else None
     move = start_robot_reply()
     if not move:
         return jsonify({"status": "error"}), 500
@@ -1540,7 +1666,8 @@ def start_robot_reply():
     counts = game_counts()           # état du cimetière AVANT ce coup
     game_engine.push_move(move)      # inscrit la pièce prise au registre
     # L'horloge du joueur ne démarre qu'une fois le robot revenu en position (execute_move_sequence)
-    threading.Thread(target=execute_move_sequence, args=(board_before, move, counts), daemon=True).start()
+    threading.Thread(target=execute_move_sequence, args=(board_before, move, counts, pre_move_frame),
+                     daemon=True).start()
     return move
 
 
@@ -1557,6 +1684,8 @@ def api_validate_move():
     human_turn = (game_engine.board.turn == chess.WHITE) == config.HUMAN_PLAYS_WHITE
     if not human_turn or game_engine.is_game_over():
         return jsonify({"status": "error", "msg": "Ce n'est pas à vous de jouer."}), 400
+    if retry_state is not None:
+        return jsonify({"status": "error", "msg": "Le robot a raté une prise : réessayez ou corrigez d'abord."}), 400
     if not pick_ready():
         return jsonify({"status": "error",
                         "msg": "Calibrez d'abord les prises (page Manuel) : " + ", ".join(pick_missing())}), 400
@@ -1595,6 +1724,11 @@ def api_validate_move():
             log_gcode(f"📷 Coup non reconnu : {why}")
             return jsonify({"status": "manual", "msg": f"{why} Indiquez votre coup à l'écran."})
 
+    global pre_move_frame
+    if source == "caméra":
+        pre_move_frame = frame
+    else:
+        pre_move_frame = grab_stable_frame(2) if vision_ready() else None
     san = game_engine.board.san(move)
     game_engine.push_move(move)      # une pièce prise par le joueur va au cimetière (registre)
     game_engine.start_clock(game_engine.board.turn)   # le temps du robot court : réflexion + mouvements
@@ -2040,6 +2174,80 @@ def api_version():
     return jsonify({"version": APP_VERSION})
 
 
+@app.route('/api/settings', methods=['GET', 'POST'])
+def api_settings():
+    """Lecture / modification des réglages (vitesses Z et XY, son)."""
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if 'z_feed' in data:
+            settings['z_feed'] = max(5.0, min(45.0, float(data['z_feed'])))
+        if 'xy_feed' in data:
+            settings['xy_feed'] = max(20.0, min(150.0, float(data['xy_feed'])))
+        if 'sound' in data:
+            settings['sound'] = bool(data['sound'])
+        save_settings()
+        if 'z_feed' in data:
+            apply_motion_settings()
+        log_gcode(f"Réglages : Z {settings['z_feed']:g} mm/s, XY {settings['xy_feed']:g} mm/s, "
+                  f"son {'ON' if settings['sound'] else 'OFF'}")
+    return jsonify({"status": "ok", **settings})
+
+
+SOUNDS_DIR = os.path.join(parent_dir, "sounds")
+
+
+@app.route('/sounds/<path:name>')
+def custom_sound(name):
+    """Sons personnels déposés dans sounds/ (ex. victoire.mp3, coup.mp3) : remplacent les sons générés."""
+    from flask import send_from_directory
+    if not os.path.isfile(os.path.join(SOUNDS_DIR, name)):
+        return Response(status=404)
+    return send_from_directory(SOUNDS_DIR, name)
+
+
+@app.route('/api/retry_pick', methods=['POST'])
+def api_retry_pick():
+    """Refait les déplacements ratés du dernier coup du robot, puis revérifie."""
+    global status_msg
+    if retry_state is None:
+        return jsonify({"status": "error", "msg": "Aucune prise à refaire."}), 400
+    if not retry_state["not_picked"]:
+        return jsonify({"status": "error",
+                        "msg": "La pièce a été lâchée en route : replacez-la à la main puis « C'est réglé »."}), 400
+    if not robot_busy.acquire(blocking=False):
+        return jsonify({"status": "busy", "msg": "Le robot est en mouvement."}), 409
+
+    def run():
+        global status_msg
+        try:
+            st = retry_state
+            status_msg = "🔁 Nouvelle tentative de prise..."
+            retry_steps(st["not_picked"])
+            move_to_vision_position()
+            if _check_robot_move(st["board_before"], st["move"], st["pre_frame"]):
+                log_gcode("✅ Prise réussie après nouvelle tentative")
+                _finish_robot_turn(st["move"])
+        except Exception as e:
+            log_gcode(f"Erreur nouvelle tentative : {e}")
+        finally:
+            robot_busy.release()
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/retry_done', methods=['POST'])
+def api_retry_done():
+    """Le joueur a remis la pièce à la main : on reprend la partie."""
+    global retry_state
+    if retry_state is None:
+        return jsonify({"status": "ok"})
+    move = retry_state["move"]
+    retry_state = None
+    log_gcode("✋ Pièce replacée à la main")
+    threading.Thread(target=_finish_robot_turn, args=(move,), daemon=True).start()
+    return jsonify({"status": "ok"})
+
+
 @app.route('/api/position')
 def api_position():
     return jsonify(last_position)
@@ -2294,6 +2502,9 @@ def api_leg_load():
     moves = _parse_legendary_pgn(game['pgn'])
     if not moves:
         return jsonify({'status': 'error', 'msg': 'Erreur lecture PGN'}), 500
+    global leg_ref_frame, leg_retry
+    leg_ref_frame = None
+    leg_retry = None
     with leg_lock:
         leg_board  = chess.Board()
         leg_moves  = moves
@@ -2315,20 +2526,74 @@ def _leg_captured():
     return captured
 
 
+leg_ref_frame = None   # photo du plateau avant le prochain coup légendaire (vérification)
+leg_retry = None       # prise ratée en attente : {board_before, move, not_picked, dropped}
+
+
+def _leg_verify_enabled():
+    return (getattr(config, 'LEG_VERIFY', True) and camera.cam_ok
+            and vision_engine.is_calibrated() and (homed or config.SIMULATION_MODE))
+
+
+def _leg_photo():
+    """Tête en position caméra, photo stable du plateau."""
+    move_to_vision_position()
+    time.sleep(getattr(config, 'VISION_SETTLE_SEC', 1.0))
+    return grab_stable_frame()
+
+
+def _leg_check(board_before, move):
+    """Vérifie le coup légendaire (une nouvelle tentative automatique). True si tout est en place."""
+    global leg_ref_frame, leg_retry
+    move_to_vision_position()
+    res = verify_physical_move(leg_ref_frame, board_before, move)
+    if res and res[0]:
+        retry_steps(res[0])
+        move_to_vision_position()
+        res = verify_physical_move(leg_ref_frame, board_before, move)
+    if res and (res[0] or res[1]):
+        leg_retry = {"board_before": board_before, "move": move, "not_picked": res[0], "dropped": res[1]}
+        log_gcode("⚠️ Légendaire, prise ratée : " + describe_failure(res[0], res[1]))
+        return False
+    leg_retry = None
+    leg_ref_frame = grab_stable_frame()
+    return True
+
+
+def _leg_response(status, uci=None, **extra):
+    outcome = leg_board.outcome()
+    return jsonify({
+        'status': status, 'uci': uci, 'index': leg_index, 'total': len(leg_moves),
+        'turn': 'white' if leg_board.turn else 'black',
+        'game_over': leg_board.is_game_over() or leg_index >= len(leg_moves),
+        'outcome': outcome.result() if outcome else None,
+        'captured': _leg_captured(), **extra})
+
+
 @app.route('/api/leg/next_move', methods=['POST'])
 def api_leg_next_move():
-    global leg_index
+    global leg_index, leg_ref_frame
     with leg_lock:
+        if leg_retry is not None:
+            return jsonify({'status': 'error', 'msg': "Prise ratée en attente : réessayez ou corrigez d'abord."}), 400
         if leg_index >= len(leg_moves):
             return jsonify({'status': 'done'})
         move = leg_moves[leg_index]
         uci  = move.uci()
+        board_before = leg_board.copy()
+        verify = _leg_verify_enabled()
         try:
+            if verify and leg_ref_frame is None:
+                leg_ref_frame = _leg_photo()
             execute_leg_move_sequence(uci)
-        except PickNotCalibrated as e:
+        except (PickNotCalibrated, NotHomed) as e:
             return jsonify({'status': 'error', 'msg': str(e)}), 400
         leg_board.push(move)
         leg_index += 1
+        if verify and not _leg_check(board_before, move):
+            return _leg_response('retry', uci, msg="⚠️ Prise ratée : " +
+                                 describe_failure(leg_retry["not_picked"], leg_retry["dropped"]),
+                                 can_retry=bool(leg_retry["not_picked"]))
         outcome = leg_board.outcome()
         return jsonify({
             'status': 'ok',
@@ -2342,9 +2607,39 @@ def api_leg_next_move():
         })
 
 
+@app.route('/api/leg/retry', methods=['POST'])
+def api_leg_retry():
+    """Refait la prise ratée du dernier coup légendaire, puis revérifie."""
+    with leg_lock:
+        if leg_retry is None:
+            return jsonify({'status': 'ok'})
+        if not leg_retry["not_picked"]:
+            return jsonify({'status': 'error', 'msg': "Pièce lâchée en route : replacez-la à la main."}), 400
+        st = leg_retry
+        retry_steps(st["not_picked"])
+        if _leg_check(st["board_before"], st["move"]):
+            return jsonify({'status': 'ok'})
+        return jsonify({'status': 'retry', 'msg': "⚠️ Toujours raté : " +
+                        describe_failure(leg_retry["not_picked"], leg_retry["dropped"]),
+                        'can_retry': bool(leg_retry["not_picked"])})
+
+
+@app.route('/api/leg/retry_done', methods=['POST'])
+def api_leg_retry_done():
+    """Pièce replacée à la main : nouvelle photo de référence, la lecture peut reprendre."""
+    global leg_retry, leg_ref_frame
+    with leg_lock:
+        leg_retry = None
+        leg_ref_frame = _leg_photo() if _leg_verify_enabled() else None
+    return jsonify({'status': 'ok'})
+
+
 @app.route('/api/leg/prev_move', methods=['POST'])
 def api_leg_prev_move():
     global leg_index
+    global leg_ref_frame, leg_retry
+    leg_ref_frame = None
+    leg_retry = None
     with leg_lock:
         if leg_index == 0:
             return jsonify({'status': 'start'})
@@ -2357,6 +2652,9 @@ def api_leg_prev_move():
 @app.route('/api/leg/reset', methods=['POST'])
 def api_leg_reset():
     global leg_board, leg_index
+    global leg_ref_frame, leg_retry
+    leg_ref_frame = None
+    leg_retry = None
     with leg_lock:
         leg_board = chess.Board()
         leg_index = 0

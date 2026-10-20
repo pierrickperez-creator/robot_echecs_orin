@@ -160,6 +160,16 @@
     </div>
 </div>
 
+<div id="leg-alert" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+     z-index:2000;background:#2c1a00;border:3px solid #e67e22;border-radius:14px;padding:20px 24px;
+     text-align:center;color:#f5d0a0;font-family:sans-serif;max-width:90vw">
+    <div id="leg-alert-msg" style="font-size:17px;font-weight:bold;margin-bottom:14px"></div>
+    <button id="leg-retry-btn" onclick="legRetry()"
+            style="padding:14px 22px;font-size:16px;background:#27ae60;color:#fff;border:0;border-radius:8px;margin:4px">🔁 Réessayer</button>
+    <button onclick="legRetryDone()"
+            style="padding:14px 22px;font-size:16px;background:#2980b9;color:#fff;border:0;border-radius:8px;margin:4px">✋ C'est réglé</button>
+    <div style="font-size:12px;color:#aaa;margin-top:10px">Ensuite, touchez ▶ JOUER pour reprendre la lecture.</div>
+</div>
 <script>
 // ─── Cimetière (même logique que simulation.html) ────────────────────────────
 const WHITE_GY = [];
@@ -304,15 +314,37 @@ function nextMove(fromTimer = false) {
     if (!gameLoaded || gameOver) { stopPlay(); return; }
     fetch('/api/leg/next_move', {method: 'POST'}).then(r => r.json()).then(d => {
         if (d.status === 'done') { stopPlay(); return; }
+        if (d.status === 'error') { stopPlay(); showLegAlert(d.msg, false); return; }
         moveHistory.push({uci: d.uci, color: d.turn === 'white' ? 'b' : 'w'});
         refreshBoard();
         updateProgress(d.index, d.total);
         updateTurnBox(d.turn, d.game_over, d.outcome);
         renderHistory();
         if (d.captured) renderGraveyard(d.captured.w, d.captured.b);
+        if (d.status === 'retry') { stopPlay(); showLegAlert(d.msg, d.can_retry); return; }
         if (d.game_over) { gameOver = true; stopPlay(); return; }
         if (playing) scheduleNext();
     });
+}
+
+// ─── Prise ratée (vérifiée par la caméra) ─────────────────────────────────────
+function showLegAlert(msg, canRetry) {
+    const box = document.getElementById('leg-alert');
+    document.getElementById('leg-alert-msg').textContent = msg || 'Problème';
+    document.getElementById('leg-retry-btn').style.display = canRetry ? '' : 'none';
+    box.style.display = 'block';
+}
+function hideLegAlert() { document.getElementById('leg-alert').style.display = 'none'; }
+function legRetry() {
+    document.getElementById('leg-alert-msg').textContent = '🔁 Nouvelle tentative...';
+    fetch('/api/leg/retry', {method: 'POST'}).then(r => r.json()).then(d => {
+        if (d.status === 'ok') { hideLegAlert(); }
+        else showLegAlert(d.msg, d.can_retry);
+    });
+}
+function legRetryDone() {
+    document.getElementById('leg-alert-msg').textContent = '📷 Nouvelle photo du plateau...';
+    fetch('/api/leg/retry_done', {method: 'POST'}).then(() => hideLegAlert());
 }
 
 // ─── Coup précédent ───────────────────────────────────────────────────────────

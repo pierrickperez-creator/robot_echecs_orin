@@ -387,6 +387,7 @@
                 <a class="nav-btn" href="/simulation">♟ Simulation</a>
                 <a class="nav-btn" href="/legendaires">★ Légendaires</a>
                 <a class="nav-btn" href="/controle_manuel">🎮 Manuel</a>
+                <button class="nav-btn" id="sound-btn" onclick="toggleSound()" title="Sons">🔊</button>
             </div>
         </div>
 
@@ -669,6 +670,13 @@ function mainAction() {
     const btn = document.getElementById('btn-play-robot');
     if (btn.classList.contains('waiting') || actionPending) return;
     if (btn.dataset.mode === 'startup') { startupReopen(); return; }
+    if (btn.dataset.mode === 'retry') {
+        setBusyButton('🔁 Nouvelle tentative...');
+        fetch('/api/retry_pick', {method:'POST'}).then(r=>r.json())
+            .then(d => { if (d.status !== 'ok') document.getElementById('status').textContent = d.msg; })
+            .finally(pollStatus);
+        return;
+    }
     if (btn.dataset.mode === 'human') validateMove();
     else if (btn.dataset.mode === 'robot') playRobotMove();
 }
@@ -718,9 +726,71 @@ function validateMove(uci) {
     }).finally(()=>{ actionPending = false; pollStatus(); });
 }
 
+// ─── Sons (haut-parleurs de l'écran) ──────────────────────────────────────
+let soundOn = true;
+let audioCtx = null;
+function audio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+}
+// Le navigateur n'autorise le son qu'après un premier toucher de l'écran
+document.addEventListener('pointerdown', () => { try { audio(); } catch (e) {} }, {once: true});
+
+function note(freq, start, dur, vol = 0.25, type = 'triangle') {
+    const ctx = audio(), t = ctx.currentTime + start;
+    const osc = ctx.createOscillator(), gain = ctx.createGain(), lp = ctx.createBiquadFilter();
+    osc.type = type; osc.frequency.value = freq;
+    lp.type = 'lowpass'; lp.frequency.value = 2500;          // son rond, pas criard
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(vol, t + 0.015);   // attaque douce
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);  // extinction lente
+    osc.connect(lp); lp.connect(gain); gain.connect(ctx.destination);
+    osc.start(t); osc.stop(t + dur + 0.05);
+}
+function playFile(name, fallback) {
+    // Fichier personnel dans sounds/ s'il existe, sinon son généré
+    let done = false;
+    const once = () => { if (!done) { done = true; fallback(); } };
+    const a = new Audio('/sounds/' + name + '?t=' + Date.now());
+    a.onerror = once;
+    a.play().then(() => { done = true; }).catch(once);
+}
+const SOUNDS = {
+    // Carillon chaleureux : quinte montante, notes qui se recouvrent
+    coup: () => { note(523.25, 0, 0.9, 0.22); note(783.99, 0.14, 1.1, 0.18); note(1046.5, 0.14, 1.1, 0.05, 'sine'); },
+    // Fanfare « trésor » originale : arpège qui monte puis accord tenu
+    victoire: () => {
+        [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => note(f, i * 0.13, 0.5, 0.2));
+        [523.25, 659.25, 783.99, 1046.5].forEach(f => note(f, 0.6, 1.8, 0.12));
+        note(1318.5, 0.6, 1.8, 0.06, 'sine');
+    },
+    // Robot gagnant : petit motif descendant, sans dramatiser
+    defaite: () => { [659.25, 587.33, 523.25, 392.0].forEach((f, i) => note(f, i * 0.18, 0.6, 0.16)); },
+    nulle: () => { note(587.33, 0, 0.6, 0.16); note(587.33, 0.25, 0.9, 0.14); },
+};
+function playSound(name) {
+    if (!soundOn) return;
+    try { playFile(name + '.mp3', () => SOUNDS[name] && SOUNDS[name]()); } catch (e) {}
+}
+function setSoundButton() {
+    const b = document.getElementById('sound-btn');
+    if (b) { b.textContent = soundOn ? '🔊' : '🔇'; b.style.opacity = soundOn ? 1 : 0.6; }
+}
+function toggleSound() {
+    soundOn = !soundOn; setSoundButton();
+    fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({sound: soundOn})});
+    if (soundOn) SOUNDS.coup();
+}
+let wasRobotBusy = false;
+
 // ─── Démarrage : homing piloté depuis l'écran ─────────────────────────────
 let startupShown = '';
 let startupDismissed = '';   // état dans lequel l'utilisateur a fermé la fenêtre (croix)
+function retryDone() {
+    fetch('/api/retry_done', {method:'POST'}).then(pollStatus);
+}
 function startupDismiss() {
     startupDismissed = startupShown;
     document.getElementById('startup-modal').classList.remove('show');
@@ -765,6 +835,18 @@ function updateMainButton(d) {
     const btn    = document.getElementById('btn-play-robot');
     const banner = document.getElementById('safety-banner');
     banner.classList.remove('show', 'info');
+    if (!(d.retry && !d.robot_busy)) banner.dataset.html = '';
+    if (d.retry && !d.robot_busy) {
+        // Prise ratée vérifiée par la caméra
+        btn.className = 'ready'; btn.dataset.mode = d.retry.can_retry ? 'retry' : '';
+        btn.textContent = d.retry.can_retry ? '🔁 RÉESSAYER LA PRISE' : '✋ REPLACEZ LA PIÈCE';
+        const html = (d.retry.msg || 'Prise ratée') +
+            '<br><button class="btn-teal" style="margin-top:8px;padding:12px 20px;font-size:15px" ' +
+            'onclick="retryDone()">✋ C\'est réglé, j\'ai placé la pièce</button>';
+        if (banner.dataset.html !== html) { banner.innerHTML = html; banner.dataset.html = html; }  // pas de clignotement
+        banner.classList.add('show');
+        return;
+    }
     if (d.startup_state && d.startup_state !== 'pret') {
         btn.className = 'ready'; btn.dataset.mode = 'startup';
         btn.textContent = '▶ DÉMARRER LE ROBOT';
@@ -1043,6 +1125,13 @@ function pollStatus() {
         // Historique
         if (d.moves) renderMoveHistory(d.moves);
 
+        // Son de fin de coup : le robot vient de finir de bouger et c'est au joueur
+        if (d.sound !== undefined && d.sound !== soundOn) { soundOn = d.sound; setSoundButton(); }
+        if (wasRobotBusy && !d.robot_busy && !d.robot_turn && !d.game_over && d.startup_state === 'pret') {
+            playSound('coup');
+        }
+        wasRobotBusy = d.robot_busy;
+
         // Bouton principal : J'AI JOUÉ / JOUER ROBOT / robot en action
         updateMainButton(d);
         updateStartup(d);
@@ -1051,6 +1140,9 @@ function pollStatus() {
         if (d.game_over && !wasGameOver && d.outcome) {
             wasGameOver = true;
             showCelebration(d.outcome);
+            const humanWon = (d.outcome === '1-0' && d.human_plays_white) || (d.outcome === '0-1' && !d.human_plays_white);
+            const robotWon = (d.outcome === '1-0' && !d.human_plays_white) || (d.outcome === '0-1' && d.human_plays_white);
+            playSound(humanWon ? 'victoire' : robotWon ? 'defaite' : 'nulle');
         } else if (!d.game_over) {
             wasGameOver = false;
         }

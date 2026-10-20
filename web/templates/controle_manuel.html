@@ -213,6 +213,25 @@
             <span id="feed-display">33 mm/s</span>
         </div>
 
+        <!-- Vitesses -->
+        <div class="section-title">⚡ Vitesses du robot</div>
+        <div class="feed-row">
+            <label style="width:80px">Montée Z</label>
+            <input type="range" id="z-feed" min="10" max="45" step="1"
+                   oninput="document.getElementById('z-feed-v').textContent=this.value+' mm/s'">
+            <span id="z-feed-v">—</span>
+        </div>
+        <div class="feed-row">
+            <label style="width:80px">Déplacements</label>
+            <input type="range" id="xy-feed" min="20" max="150" step="5"
+                   oninput="document.getElementById('xy-feed-v').textContent=this.value+' mm/s'">
+            <span id="xy-feed-v">—</span>
+        </div>
+        <button class="btn-teal" style="width:100%" onclick="saveSpeeds()">💾 Appliquer les vitesses</button>
+        <div style="font-size:10px;color:#888;margin:2px 0 8px">
+            Trop rapide en Z, le moteur peut sauter des pas : si l'aimant rate les vis, baissez « Montée Z ».
+        </div>
+
         <!-- Calibration des prises -->
         <div class="section-title">🎯 Calibration des prises <span id="pick-state" style="font-weight:normal"></span></div>
         <div style="font-size:10px;color:#888;margin-bottom:4px">
@@ -531,6 +550,22 @@ function pickTest(sameSquare) {
     .catch(() => pickMsg('❌ Serveur injoignable'));
 }
 pickRefresh();
+
+function loadSpeeds() {
+    fetch('/api/settings').then(r => r.json()).then(d => {
+        document.getElementById('z-feed').value = d.z_feed;
+        document.getElementById('xy-feed').value = d.xy_feed;
+        document.getElementById('z-feed-v').textContent = d.z_feed + ' mm/s';
+        document.getElementById('xy-feed-v').textContent = d.xy_feed + ' mm/s';
+    });
+}
+function saveSpeeds() {
+    fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({z_feed: +document.getElementById('z-feed').value,
+                              xy_feed: +document.getElementById('xy-feed').value})})
+    .then(r => r.json()).then(d => { pickMsg('✅ Vitesses appliquées : Z ' + d.z_feed + ' mm/s, déplacements ' + d.xy_feed + ' mm/s'); });
+}
+loadSpeeds();
 
 function visionCall(url, btn) {
     const msg = document.getElementById('vision-msg');

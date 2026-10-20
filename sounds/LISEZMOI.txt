@@ -1,0 +1,6 @@
+Sons personnels du robot (facultatifs) :
+  coup.mp3      joué quand le robot a fini son coup
+  victoire.mp3  joué quand le joueur gagne
+  defaite.mp3   joué quand le robot gagne
+Sans fichier, la page joue des sons générés (carillon et fanfare originaux).
+N'utilisez que des sons que vous avez le droit de diffuser.

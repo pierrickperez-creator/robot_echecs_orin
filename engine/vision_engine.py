@@ -213,9 +213,21 @@ class VisionEngine:
         cur = self._prepare(frame)
         if cur is None or self.reference_frame is None:
             return None
+        scores = self._scores(self.reference_frame, cur)
+        self.last_scores = scores
+        return scores
+
+    def scores_between(self, frame_before, frame_after):
+        """Différence par case entre deux photos brutes (vérification d'un coup du robot)."""
+        a, b = self._prepare(frame_before), self._prepare(frame_after)
+        if a is None or b is None:
+            return None
+        return self._scores(a, b)
+
+    def _scores(self, ref, cur):
         # Égalise la luminosité générale : une lampe allumée ou un nuage ne doit pas
         # faire « changer » toutes les cases à la fois.
-        ref = self.reference_frame.astype(np.float32)
+        ref = ref.astype(np.float32)
         cur = cur.astype(np.float32)
         board_ref, board_cur = ref[40:360, 40:360], cur[40:360, 40:360]
         gain = float(np.median(board_ref)) / max(float(np.median(board_cur)), 1.0)
@@ -227,7 +239,6 @@ class VisionEngine:
             c, r = self.square_to_cell(sq)
             roi = diff[r * cell + m:(r + 1) * cell - m, c * cell + m:(c + 1) * cell - m]
             scores[sq] = float(roi.mean())
-        self.last_scores = scores
         return scores
 
     @staticmethod
