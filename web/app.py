@@ -692,12 +692,34 @@ class PickNotCalibrated(RuntimeError):
     pass
 
 
-def move_piece(fx, fy, tx, ty, ptype='k'):
+def path_is_clear(fx, fy, tx, ty, occupied):
+    """
+    Vrai si le segment (fx,fy)→(tx,ty) ne passe à moins d'une largeur de pièce
+    d'aucun emplacement occupé (hors départ et arrivée).
+    """
+    if occupied is None:
+        return False          # occupation inconnue : on vole haut par sécurité
+    r = config.PIECE_FOOTPRINT_MM
+    dx, dy = tx - fx, ty - fy
+    L2 = dx * dx + dy * dy
+    for ox, oy in occupied:
+        if (ox - fx) ** 2 + (oy - fy) ** 2 < 4 or (ox - tx) ** 2 + (oy - ty) ** 2 < 4:
+            continue           # la pièce elle-même (départ) ou sa case d'arrivée
+        t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((ox - fx) * dx + (oy - fy) * dy) / L2))
+        px, py = fx + t * dx, fy + t * dy
+        if (ox - px) ** 2 + (oy - py) ** 2 < r * r:
+            return False
+    return True
+
+
+def move_piece(fx, fy, tx, ty, ptype='k', occupied=None):
     """
     Déplace physiquement une pièce de type `ptype` ('p','n','b','r','q','k')
     de (fx,fy) à (tx,ty). L'aimant se pose sur la tête de la pièce (hauteur
-    calibrée pour chaque type) ; pendant le transport, le bas de la pièce passe
-    au-dessus de la plus haute pièce du plateau.
+    calibrée pour chaque type).
+    Transport : si `occupied` (liste des emplacements occupés, en mm) montre un
+    trajet libre, la pièce glisse à quelques mm du plateau ; sinon elle passe
+    au-dessus des autres pièces. `occupied` est mis à jour (départ → arrivée).
     """
     if not pick_ready():
         raise PickNotCalibrated("Prises non calibrées : " + ", ".join(pick_missing()))
@@ -710,6 +732,8 @@ def move_piece(fx, fy, tx, ty, ptype='k'):
         z_pick = pick_z(ptype)
         z_travel = travel_z()
         z_carry = z_travel + piece_height(ptype)
+        if path_is_clear(fx, fy, tx, ty, occupied):
+            z_carry = z_pick + config.LOW_FLIGHT_MM   # le bas de la pièce frôle le plateau
     z_near = z_pick + config.PICK_APPROACH_MM
 
     lift_to(z_travel)
@@ -725,6 +749,9 @@ def move_piece(fx, fy, tx, ty, ptype='k'):
     magnet(False)
     send_gcode_raw(f"G4 P{config.MAGNET_DWELL_MS}")
     move_xyz(tx, ty, z_travel)
+    if occupied is not None:
+        occupied[:] = [o for o in occupied if (o[0] - fx) ** 2 + (o[1] - fy) ** 2 >= 4]
+        occupied.append((tx, ty))
 
 
 def lift_to(z):
@@ -796,6 +823,22 @@ def reconstruct_capture_order():
     return graveyard_contents(game_engine.board)
 
 
+def physical_occupancy(board):
+    """
+    Emplacements occupés (mm) pour la position `board` : cases de l'échiquier,
+    cimetières (dans l'ordre des captures) et dames de réserve encore en place.
+    """
+    import chess as chess_lib
+    occ = [calculate_xy(chess_lib.square_name(sq)) for sq in board.piece_map()]
+    w_types, b_types = graveyard_contents(board)
+    occ += [graveyard_xy(True, i) for i in range(len(w_types))]
+    occ += [graveyard_xy(False, i) for i in range(len(b_types))]
+    wq, bq = queens_used(board)
+    occ += [grid_to_xy(*c) for c in config.WHITE_QUEEN_RESERVE_CELLS[wq:]]
+    occ += [grid_to_xy(*c) for c in config.BLACK_QUEEN_RESERVE_CELLS[bq:]]
+    return occ
+
+
 def perform_physical_move(board_before, move):
     """
     Exécute physiquement `move` à partir de la position `board_before`
@@ -812,10 +855,11 @@ def perform_physical_move(board_before, move):
     dst_x, dst_y = calculate_xy(dst_sq)
     w_types, b_types = graveyard_contents(board)
     w_used = {chess_lib.WHITE: len(w_types), chess_lib.BLACK: len(b_types)}
+    occupied = physical_occupancy(board)
 
     def to_graveyard(x, y, color, ptype):
         gx, gy = graveyard_xy(color == chess_lib.WHITE, w_used[color])
-        move_piece(x, y, gx, gy, ptype)
+        move_piece(x, y, gx, gy, ptype, occupied)
         w_used[color] += 1
 
     mover = board.piece_at(move.from_square)
@@ -838,11 +882,11 @@ def perform_physical_move(board_before, move):
         used_idx = wq if board.turn == chess_lib.WHITE else bq
         if used_idx < len(reserve):
             qx, qy = reserve_xy(board.turn == chess_lib.WHITE, used_idx)
-            move_piece(qx, qy, dst_x, dst_y, 'q')
+            move_piece(qx, qy, dst_x, dst_y, 'q', occupied)
         else:
             log_gcode(f"⚠ Plus de dame en réserve : posez-la à la main sur {dst_sq}")
     else:
-        move_piece(src_x, src_y, dst_x, dst_y, mover_t)
+        move_piece(src_x, src_y, dst_x, dst_y, mover_t, occupied)
 
     # --- 3. Roque : déplacer la tour ---
     if board.is_castling(move):
@@ -851,7 +895,7 @@ def perform_physical_move(board_before, move):
         rook_dst = ('f' if king_side else 'd') + dst_sq[1]
         rx1, ry1 = calculate_xy(rook_src)
         rx2, ry2 = calculate_xy(rook_dst)
-        move_piece(rx1, ry1, rx2, ry2, 'r')
+        move_piece(rx1, ry1, rx2, ry2, 'r', occupied)
 
 
 robot_busy = threading.Lock()   # un seul coup robot à la fois (double appui écran)
@@ -921,6 +965,7 @@ def reset_board_physically():
     park_b = []  # pour les noirs
     w_park_idx = len(w_grave_types)
     b_park_idx = len(b_grave_types)
+    occupied = physical_occupancy(game_engine.board)
 
     for sq in chess_lib.SQUARES:
         piece = game_engine.board.piece_at(sq)
@@ -933,14 +978,14 @@ def reset_board_physically():
             slot = min(w_park_idx, len(config.WHITE_GRAVEYARD_CELLS) - 1)
             gx, gy = graveyard_xy(True, slot)
             log_gcode(f"  Gare {sq_name} (blanc) → slot W{slot}")
-            move_piece(px, py, gx, gy, piece.symbol())
+            move_piece(px, py, gx, gy, piece.symbol(), occupied)
             park_w.append((slot, piece.piece_type))
             w_park_idx += 1
         else:
             slot = min(b_park_idx, len(config.BLACK_GRAVEYARD_CELLS) - 1)
             gx, gy = graveyard_xy(False, slot)
             log_gcode(f"  Gare {sq_name} (noir) → slot B{slot}")
-            move_piece(px, py, gx, gy, piece.symbol())
+            move_piece(px, py, gx, gy, piece.symbol(), occupied)
             park_b.append((slot, piece.piece_type))
             b_park_idx += 1
 
@@ -968,7 +1013,7 @@ def reset_board_physically():
             gx, gy = graveyard_xy(True, slot)
             tx, ty = calculate_xy(sq_name)
             log_gcode(f"  W{slot} → {sq_name} ({chess_lib.piece_name(pt)})")
-            move_piece(gx, gy, tx, ty, chess_lib.piece_symbol(pt))
+            move_piece(gx, gy, tx, ty, chess_lib.piece_symbol(pt), occupied)
 
     for pt, squares in BLACK_HOME.items():
         for sq_name in squares:
@@ -979,7 +1024,7 @@ def reset_board_physically():
             gx, gy = graveyard_xy(False, slot)
             tx, ty = calculate_xy(sq_name)
             log_gcode(f"  B{slot} → {sq_name} ({chess_lib.piece_name(pt)})")
-            move_piece(gx, gy, tx, ty, chess_lib.piece_symbol(pt))
+            move_piece(gx, gy, tx, ty, chess_lib.piece_symbol(pt), occupied)
 
     log_gcode("═══ PLATEAU RANGÉ ═══")
     game_engine.reset()   # les pièces sont en position initiale : la mémoire aussi

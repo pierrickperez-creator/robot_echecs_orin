@@ -52,8 +52,8 @@ FEED_TRAVEL    = 4000.0
 Y_MAX_ACCEL    = 250          # mm/s² (firmware : 1000)
 TRAVEL_ACCEL   = 1000         # mm/s² accélération des déplacements (firmware : 3000)
 XY_JERK        = 5            # mm/s  changement de vitesse instantané (firmware : 20)
-Z_MAX_FEED     = 14           # mm/s  vitesse max Z (firmware : 8). Si Z perd des pas (homing faux), baisser.
-Z_MAX_ACCEL    = 80           # mm/s² accélération Z (firmware : 20)
+Z_MAX_FEED     = 18           # mm/s  vitesse max Z (firmware : 8 ; 14 validé en partie). Si Z perd des pas, baisser.
+Z_MAX_ACCEL    = 120          # mm/s² accélération Z (firmware : 20 ; 80 validé en partie)
 FEED_Z         = 1000.0
 
 # --- ZONES DE STOCKAGE (EN FORME DE U) ---
@@ -91,6 +91,8 @@ BLACK_QUEEN_RESERVE = [grid_xy(c, r) for c, r in BLACK_QUEEN_RESERVE_CELLS]
 PIECE_HEIGHT_MM   = 33.0      # Toutes les pièces : 30 mm + tête de vis de 3 mm (prise par l'aimant)
 HOVER_MM          = 1.0       # Survol au-dessus de la vis pour centrer l'aimant à l'œil
 PICK_CLEARANCE_MM = 8.0       # Marge au-dessus de la plus haute pièce pendant les trajets
+LOW_FLIGHT_MM     = 6.0       # Trajet libre : le bas de la pièce portée passe à 6 mm du plateau
+PIECE_FOOTPRINT_MM = 20.0     # Écart minimal (centre à centre) entre la pièce portée et une autre pièce
 PICK_APPROACH_MM  = 4.0       # Les derniers mm de descente se font lentement
 FEED_APPROACH     = 200.0     # mm/min pour l'approche finale
 PICK_GOTO_Z       = 90.0      # Hauteur des trajets tant que les hauteurs de pièces sont inconnues
