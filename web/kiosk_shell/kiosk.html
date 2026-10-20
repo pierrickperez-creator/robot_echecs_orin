@@ -24,14 +24,14 @@
 </style>
 </head>
 <body>
-<iframe id="app" src="http://localhost:5000/"></iframe>
+<iframe id="app"></iframe>
 <div id="wait">
     <div class="big">🤖 Robot en cours de redémarrage…</div>
     <div class="small">L'écran reviendra tout seul dans quelques secondes.</div>
 </div>
 <script>
 // ?base=... seulement pour les tests ; par défaut le serveur du robot
-const BASE = new URLSearchParams(location.search).get('base') || 'http://localhost:5000/';
+const BASE = new URLSearchParams(location.search).get('base') || 'http://127.0.0.1:5000/';
 document.getElementById('app').src = BASE;
 let down = false;
 

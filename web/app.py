@@ -2388,4 +2388,6 @@ if __name__ == '__main__':
     log_gcode("🚀 Serveur Robot Échecs démarré.")
     if getattr(config, 'HOME_ON_STARTUP', True):
         threading.Thread(target=startup_sequence, daemon=True).start()
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    # '::' = IPv6 ET IPv4 (double pile). Sur l'Orin, « localhost » désigne d'abord ::1 :
+    # avec 0.0.0.0 (IPv4 seul), le navigateur affichait au hasard « site indisponible ».
+    app.run(host='::', port=5000, debug=False, threaded=True)
