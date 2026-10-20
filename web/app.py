@@ -385,6 +385,12 @@ def pick_ready():
 
 
 def grid_to_xy(c, r):
+    """Cellule → position de l'aimant, correction globale de prise comprise."""
+    x, y = _grid_to_xy_raw(c, r)
+    return x + config.PICK_OFFSET_X, y + config.PICK_OFFSET_Y
+
+
+def _grid_to_xy_raw(c, r):
     """
     Cellule (colonne, rangée) de la grille 10x10 → position de l'aimant en mm.
     a1 = (1, 1). Avec la calibration, transformation affine définie par a1, h1, a8
@@ -1970,15 +1976,16 @@ def api_pick_save():
     """
     what = (request.json.get('what') or '').lower()
     pos = read_marlin_position()
+    raw_x, raw_y = pos['x'] - config.PICK_OFFSET_X, pos['y'] - config.PICK_OFFSET_Y
     if what in ('a1', 'h1', 'a8'):
-        pick_calib[what] = [round(pos['x'], 2), round(pos['y'], 2)]
+        pick_calib[what] = [round(raw_x, 2), round(raw_y, 2)]
         msg = f"{what} = X{pos['x']:.1f} Y{pos['y']:.1f}"
     elif what == 'point':
         sq = (request.json.get('square') or '').lower()
         if len(sq) != 2 or sq[0] not in 'abcdefgh' or sq[1] not in '12345678':
             return jsonify({"status": "error", "msg": f"Case inconnue : {sq}"}), 400
         before = calculate_xy(sq)
-        pick_calib.setdefault('points', {})[sq] = [round(pos['x'], 2), round(pos['y'], 2)]
+        pick_calib.setdefault('points', {})[sq] = [round(raw_x, 2), round(raw_y, 2)]
         msg = (f"{sq} centré à X{pos['x']:.1f} Y{pos['y']:.1f} "
                f"(écart corrigé X{pos['x'] - before[0]:+.1f} Y{pos['y'] - before[1]:+.1f})")
     elif what == 'surface':
