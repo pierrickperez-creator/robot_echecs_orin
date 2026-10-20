@@ -948,114 +948,147 @@ def execute_move_sequence(board_before, move, counts=None):
         robot_busy.release()
 
 
+def plan_board_reset(board, grave_w, grave_b, reserve_w_used, reserve_b_used):
+    """
+    Calcule la liste des déplacements qui remettent toutes les pièces en position de départ.
+    Emplacements : ('sq', case) | ('gy', blanc?, index) | ('res', blanc?).
+    Règles : une pièce déjà bien placée ne bouge pas ; une case de départ vide reçoit une
+    pièce du bon type (cimetière d'abord, puis pièce mal placée) ; une mauvaise pièce qui
+    occupe une case de départ est d'abord posée sur une case vide du centre. Jamais de
+    pièce posée sur un emplacement occupé.
+    Retourne (déplacements [(source, destination, type)], pièces manquantes).
+    """
+    import chess as chess_lib
+    W, B = chess_lib.WHITE, chess_lib.BLACK
+    state = {('sq', sq): (p.color, p.piece_type) for sq, p in board.piece_map().items()}
+    for color, types in ((W, grave_w), (B, grave_b)):
+        for i, t in enumerate(types):
+            state[('gy', color, i)] = (color, t)
+    if not reserve_w_used:
+        state[('res', W)] = (W, chess_lib.QUEEN)
+    if not reserve_b_used:
+        state[('res', B)] = (B, chess_lib.QUEEN)
+
+    start = chess_lib.Board()
+    target = {('sq', sq): (p.color, p.piece_type) for sq, p in start.piece_map().items()}
+    target[('res', W)] = (W, chess_lib.QUEEN)
+    target[('res', B)] = (B, chess_lib.QUEEN)
+
+    def ok(loc):
+        return loc in target and state.get(loc) == target[loc]
+
+    def free_graveyard(color):
+        cells = config.WHITE_GRAVEYARD_CELLS if color == W else config.BLACK_GRAVEYARD_CELLS
+        for i in range(len(cells)):
+            if ('gy', color, i) not in state:
+                return ('gy', color, i)
+        return None
+
+    def free_buffer():
+        """Case vide hors cases de départ (rangées 3 à 6), au plus près du centre."""
+        order = sorted((sq for sq in chess_lib.SQUARES if 2 <= chess_lib.square_rank(sq) <= 5),
+                       key=lambda q: abs(chess_lib.square_file(q) - 3.5) + abs(chess_lib.square_rank(q) - 3.5))
+        for sq in order:
+            if ('sq', sq) not in state:
+                return ('sq', sq)
+        return None
+
+    def rank_source(loc):
+        # cimetière / réserve d'abord, puis échiquier hors case de départ, puis mauvaise case de départ
+        if loc[0] in ('gy', 'res'):
+            return 0
+        return 1 if loc not in target else 2
+
+    moves, missing = [], []
+    skipped = set()
+    for _ in range(300):
+        todo = [t for t in target if t not in skipped and not ok(t)]
+        if not todo:
+            break
+        empty = [t for t in todo if t not in state]
+        if empty:
+            dst = empty[0]
+            need = target[dst]
+            sources = sorted((l for l, v in state.items() if v == need and not ok(l)), key=rank_source)
+            if not sources:
+                missing.append((need, dst))
+                skipped.add(dst)
+                continue
+            src = sources[0]
+        else:
+            # toutes les cases à remplir sont occupées par de mauvaises pièces : on en déplace une
+            src = todo[0]
+            dst = free_buffer() or free_graveyard(state[src][0])
+            if dst is None:
+                missing.append((state[src], src))
+                skipped.add(src)
+                continue
+        moves.append((src, dst, state[src][1]))
+        state[dst] = state.pop(src)
+
+    # Pièces en trop sur l'échiquier (ex. dame de promotion quand la réserve est déjà pleine)
+    for loc in [l for l in state if l[0] == 'sq' and not ok(l)]:
+        dst = free_graveyard(state[loc][0])
+        if dst is not None:
+            moves.append((loc, dst, state[loc][1]))
+            state[dst] = state.pop(loc)
+    return moves, missing, state
+
+
+def _loc_xy(loc):
+    import chess as chess_lib
+    if loc[0] == 'sq':
+        return calculate_xy(chess_lib.square_name(loc[1]))
+    if loc[0] == 'gy':
+        return graveyard_xy(loc[1], loc[2])
+    return reserve_xy(loc[1], 0)
+
+
+def _loc_name(loc):
+    import chess as chess_lib
+    if loc[0] == 'sq':
+        return chess_lib.square_name(loc[1])
+    if loc[0] == 'gy':
+        return f"cimetière {'blanc' if loc[1] else 'noir'} {loc[2] + 1}"
+    return f"réserve dame {'blanche' if loc[1] else 'noire'}"
+
+
 def reset_board_physically():
-    """
-    Replace toutes les pièces à leur position initiale physiquement.
-    Algorithme :
-      1. Identifier tous les emplacements actuels (échiquier + cimetière).
-      2. Garer les pièces encore sur l'échiquier dans le cimetière.
-      3. Replacer chaque pièce de son slot cimetière vers sa case de départ.
-    """
+    """Replace toutes les pièces en position de départ (voir plan_board_reset)."""
     import chess as chess_lib
     global status_msg
 
     log_gcode("═══ RANGEMENT DU PLATEAU ═══")
     status_msg = "Rangement du plateau en cours..."
+    e = game_engine
+    moves, missing, final_state = plan_board_reset(
+        e.board, e.graveyard_types(chess_lib.WHITE), e.graveyard_types(chess_lib.BLACK),
+        e.reserve_used(chess_lib.WHITE), e.reserve_used(chess_lib.BLACK))
+    log_gcode(f"  {len(moves)} déplacements prévus")
+    for (color, t), loc in missing:
+        log_gcode(f"  ⚠ Manque {PIECE_NAMES[chess_lib.piece_symbol(t)]} {'blanc' if color else 'noir'} pour {_loc_name(loc)}")
 
-    # --- Positions de départ officielles ---
-    WHITE_HOME = {
-        chess_lib.PAWN:   ['a2','b2','c2','d2','e2','f2','g2','h2'],
-        chess_lib.KNIGHT: ['b1','g1'],
-        chess_lib.BISHOP: ['c1','f1'],
-        chess_lib.ROOK:   ['a1','h1'],
-        chess_lib.QUEEN:  ['d1'],
-        chess_lib.KING:   ['e1'],
-    }
-    BLACK_HOME = {
-        chess_lib.PAWN:   ['a7','b7','c7','d7','e7','f7','g7','h7'],
-        chess_lib.KNIGHT: ['b8','g8'],
-        chess_lib.BISHOP: ['c8','f8'],
-        chess_lib.ROOK:   ['a8','h8'],
-        chess_lib.QUEEN:  ['d8'],
-        chess_lib.KING:   ['e8'],
-    }
-
-    # --- Reconstruire les types dans le cimetière ---
-    w_grave_types = game_engine.graveyard_types(chess_lib.WHITE)
-    b_grave_types = game_engine.graveyard_types(chess_lib.BLACK)
-
-    # --- Phase 1 : Garer les pièces de l'échiquier dans le cimetière ---
-    # On les place dans les slots APRÈS les pièces déjà capturées
-    park_w = []  # (slot_index, piece_type) pour les blancs garés
-    park_b = []  # pour les noirs
-    w_park_idx = len(w_grave_types)
-    b_park_idx = len(b_grave_types)
-    occupied = physical_occupancy(game_engine.board, game_counts())
-
-    for sq in chess_lib.SQUARES:
-        piece = game_engine.board.piece_at(sq)
-        if piece is None:
-            continue
-        sq_name = chess_lib.square_name(sq)
-        px, py = calculate_xy(sq_name)
-
-        if piece.color == chess_lib.WHITE:
-            slot = min(w_park_idx, len(config.WHITE_GRAVEYARD_CELLS) - 1)
-            gx, gy = graveyard_xy(True, slot)
-            log_gcode(f"  Gare {sq_name} (blanc) → slot W{slot}")
-            move_piece(px, py, gx, gy, piece.symbol(), occupied)
-            park_w.append((slot, piece.piece_type))
-            w_park_idx += 1
-        else:
-            slot = min(b_park_idx, len(config.BLACK_GRAVEYARD_CELLS) - 1)
-            gx, gy = graveyard_xy(False, slot)
-            log_gcode(f"  Gare {sq_name} (noir) → slot B{slot}")
-            move_piece(px, py, gx, gy, piece.symbol(), occupied)
-            park_b.append((slot, piece.piece_type))
-            b_park_idx += 1
-
-    # --- Construire l'inventaire complet du cimetière ---
-    # Format : (slot_index, piece_type) pour chaque pièce disponible
-    all_white = [(i, pt) for i, pt in enumerate(w_grave_types)] + park_w
-    all_black = [(i, pt) for i, pt in enumerate(b_grave_types)] + park_b
-
-    # Grouper par type pour matcher aux cases de départ
-    from collections import defaultdict
-    avail_w = defaultdict(list)
-    avail_b = defaultdict(list)
-    for slot, pt in all_white:
-        avail_w[pt].append(slot)
-    for slot, pt in all_black:
-        avail_b[pt].append(slot)
-
-    # --- Phase 2 : Replacer chaque pièce à sa position de départ ---
-    for pt, squares in WHITE_HOME.items():
-        for sq_name in squares:
-            if not avail_w[pt]:
-                log_gcode(f"  ⚠ Manque blanc {chess_lib.piece_name(pt)} pour {sq_name}")
-                continue
-            slot = avail_w[pt].pop(0)
-            gx, gy = graveyard_xy(True, slot)
-            tx, ty = calculate_xy(sq_name)
-            log_gcode(f"  W{slot} → {sq_name} ({chess_lib.piece_name(pt)})")
-            move_piece(gx, gy, tx, ty, chess_lib.piece_symbol(pt), occupied)
-
-    for pt, squares in BLACK_HOME.items():
-        for sq_name in squares:
-            if not avail_b[pt]:
-                log_gcode(f"  ⚠ Manque noir {chess_lib.piece_name(pt)} pour {sq_name}")
-                continue
-            slot = avail_b[pt].pop(0)
-            gx, gy = graveyard_xy(False, slot)
-            tx, ty = calculate_xy(sq_name)
-            log_gcode(f"  B{slot} → {sq_name} ({chess_lib.piece_name(pt)})")
-            move_piece(gx, gy, tx, ty, chess_lib.piece_symbol(pt), occupied)
+    occupied = [_loc_xy(l) for l in _reset_state_before(moves, final_state)]
+    for i, (src, dst, t) in enumerate(moves, 1):
+        status_msg = f"Rangement du plateau : {i}/{len(moves)} — ne touchez pas les pièces"
+        log_gcode(f"  {i}. {PIECE_NAMES[chess_lib.piece_symbol(t)]} {_loc_name(src)} → {_loc_name(dst)}")
+        (sx, sy), (dx, dy) = _loc_xy(src), _loc_xy(dst)
+        move_piece(sx, sy, dx, dy, chess_lib.piece_symbol(t), occupied)
 
     log_gcode("═══ PLATEAU RANGÉ ═══")
     game_engine.reset()   # les pièces sont en position initiale : la mémoire aussi
-    status_msg = "Plateau rangé ! Prêt pour une nouvelle partie."
+    status_msg = ("Plateau rangé ! Prêt pour une nouvelle partie." if not missing else
+                  "Plateau rangé, mais des pièces manquent (voir le journal).")
     move_to_vision_position()
     capture_reference()
+
+
+def _reset_state_before(moves, final_state):
+    """Emplacements occupés AVANT le rangement (état final rejoué à l'envers)."""
+    state = dict(final_state)
+    for src, dst, t in reversed(moves):
+        state[src] = state.pop(dst)
+    return list(state)
 
 
 def _reset_board_thread():
