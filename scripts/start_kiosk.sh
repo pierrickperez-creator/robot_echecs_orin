@@ -3,6 +3,9 @@
 # Appelé par ~/.config/autostart/robot-echecs-kiosk.desktop
 
 URL="http://localhost:5000"
+# Coquille locale : affiche l'application et la recharge toute seule après un
+# redémarrage du serveur (au lieu de la page d'erreur bloquante du navigateur)
+SHELL_PAGE="file://$(cd "$(dirname "$0")/.." && pwd)/web/kiosk.html"
 
 # 1. Attendre que le serveur Flask réponde (max ~2 min)
 for _ in $(seq 1 120); do
@@ -11,7 +14,7 @@ for _ in $(seq 1 120); do
 done
 
 # 2. Lancer le navigateur
-epiphany-browser "$URL" &
+epiphany-browser "$SHELL_PAGE" &
 
 # 3. Attendre sa fenêtre puis la passer en plein écran
 for _ in $(seq 1 60); do

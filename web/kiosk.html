@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Robot Échecs</title>
+<!--
+  Coquille locale du kiosque (ouverte en file://, donc toujours disponible).
+  L'application du robot s'affiche dans un cadre plein écran. Si le serveur
+  s'arrête (redémarrage, mise à jour), on affiche un message d'attente puis on
+  recharge le cadre dès qu'il répond : plus de page d'erreur bloquante du
+  navigateur sur un écran sans clavier.
+-->
+<style>
+    html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
+    #app { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+    #wait {
+        display: none; position: fixed; inset: 0; z-index: 10;
+        background: #111; color: #ddd; font-family: sans-serif;
+        align-items: center; justify-content: center; flex-direction: column; gap: 14px;
+    }
+    #wait.show { display: flex; }
+    #wait .big { font-size: 28px; color: #f1c40f; }
+    #wait .small { font-size: 16px; color: #888; }
+</style>
+</head>
+<body>
+<iframe id="app" src="http://localhost:5000/"></iframe>
+<div id="wait">
+    <div class="big">🤖 Robot en cours de redémarrage…</div>
+    <div class="small">L'écran reviendra tout seul dans quelques secondes.</div>
+</div>
+<script>
+// ?base=... seulement pour les tests ; par défaut le serveur du robot
+const BASE = new URLSearchParams(location.search).get('base') || 'http://localhost:5000/';
+document.getElementById('app').src = BASE;
+let down = false;
+
+function ping() {
+    // Une image ne demande pas d'autorisation entre origines (file:// → http://)
+    const img = new Image();
+    let done = false;
+    const timer = setTimeout(() => { if (!done) { done = true; failed(); } }, 4000);
+    img.onload  = () => { if (!done) { done = true; clearTimeout(timer); ok(); } };
+    img.onerror = () => { if (!done) { done = true; clearTimeout(timer); failed(); } };
+    img.src = BASE + 'board.svg?ping=' + Date.now();
+}
+function failed() {
+    if (!down) { down = true; document.getElementById('wait').classList.add('show'); }
+}
+function ok() {
+    if (down) {
+        down = false;
+        document.getElementById('app').src = BASE;   // retour à l'écran du robot
+        setTimeout(() => document.getElementById('wait').classList.remove('show'), 1500);
+    }
+}
+setInterval(ping, 2000);
+</script>
+</body>
+</html>
