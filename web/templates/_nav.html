@@ -1,0 +1,18 @@
+<style>
+    .site-nav { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+    .site-nav a { padding: 7px 10px; background: #2c3e50; border: 1px solid #3d5166; border-radius: 7px;
+                  color: #ccc; font-size: 12px; font-weight: bold; text-decoration: none; white-space: nowrap;
+                  font-family: sans-serif; }
+    .site-nav a:hover { background: #3d5166; color: #fff; }
+    .site-nav a.here { background: #f1c40f; border-color: #f1c40f; color: #111; }
+</style>
+<nav class="site-nav">
+    {% set here = request.path %}
+    <a href="/" class="{{ 'here' if here == '/' else '' }}">♟ Partie</a>
+    <a href="/progresser" class="{{ 'here' if here == '/progresser' else '' }}">🎓 Progresser</a>
+    <a href="/progresser/puzzles" class="{{ 'here' if here == '/progresser/puzzles' else '' }}">🧩 Puzzles</a>
+    <a href="/progresser/ouvertures" class="{{ 'here' if here == '/progresser/ouvertures' else '' }}">📖 Ouvertures</a>
+    <a href="/legendaires" class="{{ 'here' if here == '/legendaires' else '' }}">★ Légendaires</a>
+    <a href="/simulation" class="{{ 'here' if here == '/simulation' else '' }}">♞ Simulation</a>
+    <a href="/controle_manuel" class="{{ 'here' if here == '/controle_manuel' else '' }}">🎮 Manuel</a>
+</nav>

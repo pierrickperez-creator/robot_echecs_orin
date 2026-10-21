@@ -33,6 +33,7 @@ try:
     from engine.chess_logic import ChessEngine
     from engine.vision_engine import VisionEngine
     from engine.coach import Coach, OpeningTrainer, OPENINGS, fr_san
+    from engine.puzzles import PuzzleSession, load_puzzles
     print("✅ Moteurs et Configuration chargés avec succès.")
 except ImportError as e:
     print(f"❌ Erreur critique : {e}")
@@ -1276,6 +1277,67 @@ def coach_grade_async(board_before, move, ply):
     threading.Thread(target=run, daemon=True).start()
 
 
+# ── Puzzles « mat en N » ──────────────────────────────────────────────────────
+puzzles = PuzzleSession(coach)
+
+
+@app.route('/progresser/puzzles')
+def puzzles_page():
+    return render_template('puzzles.html')
+
+
+@app.route('/api/pz/list')
+def api_pz_list():
+    if not puzzles.puzzles:            # fichier généré après le démarrage du serveur
+        puzzles.puzzles = load_puzzles()
+    return jsonify(puzzles.listing())
+
+
+@app.route('/api/pz/start', methods=['POST'])
+def api_pz_start():
+    if not puzzles.start((request.get_json(silent=True) or {}).get('id', '')):
+        return jsonify({"status": "error", "msg": "Puzzle inconnu"}), 404
+    return jsonify({"status": "ok", **puzzles.state()})
+
+
+@app.route('/api/pz/move', methods=['POST'])
+def api_pz_move():
+    result, info = puzzles.try_move((request.get_json(silent=True) or {}).get('uci', ''))
+    return jsonify({"status": "ok", "result": result, **info, **puzzles.state()})
+
+
+@app.route('/api/pz/hint', methods=['POST'])
+def api_pz_hint():
+    return jsonify({"status": "ok", "hint": puzzles.hint(), **puzzles.state()})
+
+
+@app.route('/api/pz/solution', methods=['POST'])
+def api_pz_solution():
+    return jsonify({"status": "ok", "solution": puzzles.solution_text(), **puzzles.state()})
+
+
+@app.route('/pz/board.svg')
+def pz_board_svg():
+    import chess.svg
+    b = puzzles.board
+    fill = {}
+    sel = request.args.get('sel')
+    if sel:
+        try:
+            sq = chess.parse_square(sel)
+            fill[sq] = "#aaffaa"
+            for m in b.legal_moves:
+                if m.from_square == sq:
+                    fill[m.to_square] = "#ffff88"
+        except ValueError:
+            pass
+    last = b.peek() if b.move_stack else None
+    flipped = bool(puzzles.p and puzzles.p["side"] == "black")
+    svg = chess.svg.board(b, lastmove=last, fill=fill, coordinates=False, size=480, flipped=flipped,
+                          check=b.king(b.turn) if b.is_check() else None)
+    return Response(svg, mimetype='image/svg+xml')
+
+
 # ── Exercices d'ouvertures ────────────────────────────────────────────────────
 trainer = OpeningTrainer()
 
@@ -1467,7 +1529,11 @@ def api_status():
         'game_over': game_engine.is_game_over(),
         'outcome': ('pat' if outcome.termination == chess.Termination.STALEMATE else outcome.result()) if outcome else None,
         'legal_moves': game_engine.get_legal_moves(),
-        'captured': game_engine.get_captured_pieces(),
+        # Cimetière dans l'ordre réel des emplacements (ordre d'élimination), depuis le registre
+        'captured': {
+            'w': [chess.Piece(t, chess.WHITE).unicode_symbol() for t in game_engine.graveyard_types(chess.WHITE)],
+            'b': [chess.Piece(t, chess.BLACK).unicode_symbol() for t in game_engine.graveyard_types(chess.BLACK)],
+        },
         'move_count': len(game_engine.board.move_stack),
         'clock_enabled': clock_enabled,
         'used_white_queens': wq,

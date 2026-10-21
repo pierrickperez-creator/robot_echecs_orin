@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puzzles — Robot Échecs</title>
+<style>
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; background: #111; color: #ddd; font-family: sans-serif;
+           display: flex; flex-direction: column; overflow: hidden; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+             padding: 8px 14px; background: #161616; border-bottom: 1px solid #2a2a2a; }
+    header h1 { margin: 0; font-size: 20px; color: #f1c40f; white-space: nowrap; }
+    main { flex: 1; display: flex; min-height: 0; }
+    #board-zone { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 10px; }
+    #board { width: min(calc(100vh - 80px), 56vw); height: min(calc(100vh - 80px), 56vw); cursor: pointer; }
+    #side { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; min-height: 0; }
+    #title { font-size: 18px; font-weight: bold; text-align: center; color: #f1c40f; min-height: 22px; }
+    #msg { padding: 12px; border-radius: 10px; background: #1c2833; font-size: 17px; font-weight: bold;
+           text-align: center; min-height: 48px; }
+    .row { display: flex; gap: 8px; }
+    button { flex: 1; padding: 13px; border: 0; border-radius: 8px; font-size: 15px; font-weight: bold;
+             color: #fff; cursor: pointer; }
+    .levels { display: flex; gap: 6px; }
+    .lvl { background: #222; border: 1px solid #333; color: #aaa; padding: 10px 4px; font-size: 14px; }
+    .lvl.active { background: #8e44ad; border-color: #8e44ad; color: #fff; }
+    #grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+            align-content: start; min-height: 0; }
+    .pz { padding: 12px 0; background: #1f2a33; border: 1px solid #2c3e50; border-radius: 8px;
+          text-align: center; font-weight: bold; cursor: pointer; font-size: 15px; }
+    .pz.solved { background: #17301f; border-color: #27ae60; color: #2ecc71; }
+    .pz.current { outline: 3px solid #f1c40f; }
+    #count { font-size: 12px; color: #888; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+    <h1>🧩 Puzzles</h1>
+    {% include '_nav.html' %}
+</header>
+<main>
+    <div id="board-zone"><img id="board" src="/pz/board.svg" onclick="onBoard(event)" alt="échiquier"></div>
+    <div id="side">
+        <div id="title">Choisissez un niveau et un puzzle</div>
+        <div id="msg">Trouvez le mat !</div>
+        <div class="row">
+            <button style="background:#8e44ad" onclick="hint()">💡 Indice</button>
+            <button style="background:#7f8c8d" onclick="showSolution()">👁 Solution</button>
+            <button style="background:#2980b9" onclick="restart()">↺ Rejouer</button>
+            <button style="background:#27ae60" onclick="nextPuzzle()">➜ Suivant</button>
+        </div>
+        <div class="levels">
+            <button class="lvl" data-l="facile" onclick="setLevel('facile')">Facile<br><small>mat en 1</small></button>
+            <button class="lvl" data-l="normal" onclick="setLevel('normal')">Normal<br><small>mat en 2</small></button>
+            <button class="lvl" data-l="difficile" onclick="setLevel('difficile')">Difficile<br><small>mat en 3</small></button>
+            <button class="lvl" data-l="extreme" onclick="setLevel('extreme')">Extrême<br><small>mat en 4</small></button>
+        </div>
+        <div id="count"></div>
+        <div id="grid"></div>
+    </div>
+</main>
+<script>
+let all = [], level = 'facile', state = null, sel = '', busy = false;
+
+function post(url, body) {
+    return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                       body: JSON.stringify(body || {})}).then(r => r.json());
+}
+function msg(text, color) { const m = document.getElementById('msg'); m.innerHTML = text; m.style.color = color || '#ddd'; }
+function refresh() {
+    document.getElementById('board').src = '/pz/board.svg?t=' + Date.now() + (sel ? '&sel=' + sel : '');
+}
+function renderGrid() {
+    const list = all.filter(p => p.level === level);
+    const solved = list.filter(p => p.solved).length;
+    document.getElementById('count').textContent = list.length ? `${solved} / ${list.length} réussis` : 'Puzzles en cours de génération…';
+    document.getElementById('grid').innerHTML = list.map((p, i) =>
+        `<div class="pz ${p.solved ? 'solved' : ''} ${state && state.id === p.id ? 'current' : ''}"
+              onclick="start('${p.id}')">${p.solved ? '✓' : ''}${i + 1}</div>`).join('');
+    document.querySelectorAll('.lvl').forEach(b => b.classList.toggle('active', b.dataset.l === level));
+}
+function loadList() {
+    return fetch('/api/pz/list').then(r => r.json()).then(l => { all = l; renderGrid(); });
+}
+function setLevel(l) { level = l; renderGrid(); }
+function start(id) {
+    sel = '';
+    post('/api/pz/start', {id}).then(d => {
+        state = d; refresh(); renderGrid();
+        const n = all.filter(p => p.level === d.level).findIndex(p => p.id === d.id) + 1;
+        document.getElementById('title').textContent =
+            `${d.level_name} n°${n} — mat en ${d.mate_in}`;
+        msg(`Aux ${d.side === 'white' ? 'Blancs' : 'Noirs'} de jouer : trouvez le mat en ${d.mate_in} !`);
+    });
+}
+function restart() { if (state) start(state.id); }
+function nextPuzzle() {
+    const list = all.filter(p => p.level === level);
+    let i = state ? list.findIndex(p => p.id === state.id) : -1;
+    const next = list.slice(i + 1).find(p => !p.solved) || list.find(p => !p.solved) || list[(i + 1) % list.length];
+    if (next) start(next.id);
+}
+function hint() {
+    if (!state || state.solved) return;
+    post('/api/pz/hint').then(d => { if (d.hint) msg('💡 ' + d.hint, '#d7bde2'); });
+}
+function showSolution() {
+    if (!state) return;
+    post('/api/pz/solution').then(d => msg('👁 Solution : ' + d.solution, '#aed6f1'));
+}
+function squareAt(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    let f = Math.floor((event.clientX - rect.left) / (rect.width / 8));
+    let r = 7 - Math.floor((event.clientY - rect.top) / (rect.height / 8));
+    if (state && state.side === 'black') { f = 7 - f; r = 7 - r; }
+    if (f < 0 || f > 7 || r < 0 || r > 7) return '';
+    return String.fromCharCode(97 + f) + (r + 1);
+}
+function onBoard(event) {
+    if (!state || state.solved || busy) return;
+    const sq = squareAt(event);
+    if (!sq) return;
+    if (sel && state.legal_moves.some(m => m.startsWith(sel + sq))) {
+        const uci = sel + sq; sel = ''; busy = true;
+        msg('…');
+        post('/api/pz/move', {uci}).then(d => {
+            state = d; refresh();
+            if (d.result === 'solved') {
+                msg(`🏆 ${d.san} — échec et mat, bravo !`, '#2ecc71');
+                if (window.RobotSounds) RobotSounds.play('victoire');
+                loadList();
+            } else if (d.result === 'correct') {
+                msg(`✅ ${d.san} ! L'adversaire répond ${d.reply}. Continuez : mat en ${d.remaining}.`, '#2ecc71');
+            } else if (d.result === 'wrong') {
+                msg(`❌ ${d.tried} ne mate pas assez vite. Réessayez.` + (d.hint ? `<br>💡 ${d.hint}` : ''), '#e67e22');
+            }
+        }).finally(() => { busy = false; });
+        return;
+    }
+    sel = state.legal_moves.some(m => m.startsWith(sq)) ? sq : '';
+    refresh();
+}
+loadList().then(() => setLevel('facile'));
+
+// Rechargement automatique après une mise à jour du serveur
+(function () {
+    let v0 = null;
+    setInterval(() => {
+        fetch('/api/version').then(r => r.json()).then(d => {
+            if (v0 === null) v0 = d.version;
+            else if (d.version !== v0) location.reload();
+        }).catch(() => {});
+    }, 5000);
+})();
+</script>
+<script src="/static/sounds.js"></script>
+</body>
+</html>

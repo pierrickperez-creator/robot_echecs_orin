@@ -406,10 +406,7 @@
                 </svg>
             </button>
             <div class="nav-links">
-                <a class="nav-btn" href="/simulation">♟ Simulation</a>
-                <a class="nav-btn" href="/legendaires">★ Légendaires</a>
-                <a class="nav-btn" href="/controle_manuel">🎮 Manuel</a>
-                {% if coach %}<a class="nav-btn" href="/">♟ Partie</a>{% else %}<a class="nav-btn" href="/progresser">🎓 Progresser</a>{% endif %}
+                {% include '_nav.html' %}
                 <button class="nav-btn" id="sound-btn" onclick="toggleSound()" title="Sons">🔊</button>
             </div>
         </div>
