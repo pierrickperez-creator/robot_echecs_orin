@@ -192,6 +192,21 @@ class VisionEngine:
             c, row = row, c
         return c, row
 
+    @classmethod
+    def top_point(cls, square, cell=40):
+        """
+        Où apparaît, dans l'image redressée, le SOMMET d'une pièce posée sur `square`.
+        La caméra n'est pas à l'infini : un point à 33 mm de haut est vu décalé vers
+        l'extérieur, à partir du point situé sous l'objectif (« nadir »), d'un facteur k.
+        """
+        c, r = cls.square_to_cell(square)
+        nx, ny = getattr(config, "VISION_TOP_NADIR", (300.0, 265.0))   # en px, grille de 60 px par case
+        k = getattr(config, "VISION_TOP_K", 1.22)
+        f = cell / 60.0
+        nx, ny = nx * f, ny * f
+        px, py = c * cell + cell / 2, r * cell + cell / 2
+        return nx + (px - nx) * k, ny + (py - ny) * k
+
     def _prepare(self, frame):
         """Redresse + niveaux de gris + léger flou (réduit le bruit capteur)."""
         warped = self.get_warped_board(frame)
@@ -233,12 +248,23 @@ class VisionEngine:
         gain = float(np.median(board_ref)) / max(float(np.median(board_cur)), 1.0)
         cur = np.clip(cur * gain, 0, 255)
         diff = cv2.absdiff(ref, cur)
-        cell, m = 40, 8  # marge : on ignore les bords de case
+        cell, m, t = 40, 8, 5   # marge du socle ; demi-côté de la zone « sommet »
         scores = {}
         for sq in range(64):
             c, r = self.square_to_cell(sq)
-            roi = diff[r * cell + m:(r + 1) * cell - m, c * cell + m:(c + 1) * cell - m]
-            scores[sq] = float(roi.mean())
+            base = float(diff[r * cell + m:(r + 1) * cell - m, c * cell + m:(c + 1) * cell - m].mean())
+            # Une case n'a changé que si son socle ET le sommet de sa pièce ont changé : une pièce
+            # voisine qui penche (perspective) ou qui part ne touche que l'une des deux zones.
+            tx, ty = self.top_point(sq, cell)
+            x0, y0 = int(round(tx)) - t, int(round(ty)) - t
+            inside = 0 <= x0 and 0 <= y0 and x0 + 2 * t < diff.shape[1] and y0 + 2 * t < diff.shape[0]
+            # Sommet hors du champ de la caméra (zone noire du redressement) : socle seul
+            visible = inside and float(ref[y0:y0 + 2 * t + 1, x0:x0 + 2 * t + 1].mean()) > 4
+            if visible:
+                top = float(diff[y0:y0 + 2 * t + 1, x0:x0 + 2 * t + 1].mean())
+                scores[sq] = min(base, top)
+            else:
+                scores[sq] = base
         return scores
 
     @staticmethod
@@ -572,6 +598,8 @@ class VisionEngine:
             changed = self.last_scores.get(sq, 0) > thr
             # Grille (rouge = case vue comme modifiée au dernier coup)
             cv2.rectangle(debug_img, (x1, y1), (x2, y2), (0, 0, 255) if changed else (0, 255, 0), 1)
+            tx, ty = self.top_point(sq, cell_size)
+            cv2.circle(debug_img, (int(tx), int(ty)), 3, (255, 0, 255), 1)   # sommet attendu
             # Nom de la case : permet de vérifier l'orientation caméra
             cv2.putText(debug_img, files[sq % 8] + str(sq // 8 + 1), (x1 + 3, y1 + 13),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.38, (255, 255, 0), 1)
