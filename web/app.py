@@ -987,7 +987,7 @@ def verify_physical_move(pre_frame, board_before, move):
     """
     Compare la photo prise avant le coup du robot à une nouvelle photo (tête en position
     caméra). Une case de départ qui n'a pas changé = pièce pas attrapée.
-    Retourne (pas attrapées [(départ, arrivée, type)], lâchées en route [...]),
+    Retourne (pas attrapées [(départ, arrivée, type)], lâchées en route [...], photo d'après),
     ou None si la vérification est impossible (pas de caméra, pas de photo d'avant).
     """
     if pre_frame is None or not camera.cam_ok or not vision_engine.is_calibrated():
@@ -1007,7 +1007,7 @@ def verify_physical_move(pre_frame, board_before, move):
             not_picked.append((src, dst, t))
         elif scores[dst] < thr and not captured:
             dropped.append((src, dst, t))
-    return not_picked, dropped
+    return not_picked, dropped, post
 
 
 def retry_steps(steps):
@@ -1028,6 +1028,7 @@ def describe_failure(not_picked, dropped):
 
 
 pre_move_frame = None     # photo du plateau juste avant le coup du robot
+retry_state_photo = [None]  # dernière photo de vérification réussie (réutilisée comme référence)
 retry_state = None        # prise ratée en attente : {board_before, move, pre_frame, not_picked, dropped}
 
 
@@ -1058,8 +1059,10 @@ def _check_robot_move(board_before, move, pre_frame):
     res = verify_physical_move(pre_frame, board_before, move)
     if res is None or (not res[0] and not res[1]):
         retry_state = None
+        if res is not None:
+            retry_state_photo[0] = res[2]   # la photo de vérification sert de référence
         return True
-    not_picked, dropped = res
+    not_picked, dropped, _ = res
     retry_state = {"board_before": board_before, "move": move, "pre_frame": pre_frame,
                    "not_picked": not_picked, "dropped": dropped}
     status_msg = "⚠️ Prise ratée : " + describe_failure(not_picked, dropped)
@@ -1070,7 +1073,11 @@ def _check_robot_move(board_before, move, pre_frame):
 def _finish_robot_turn(move):
     """Coup du robot terminé et vérifié : photo de référence, message, horloge du joueur."""
     global status_msg
-    capture_reference()
+    photo, retry_state_photo[0] = retry_state_photo[0], None
+    if photo is not None and vision_engine.set_reference(photo):
+        log_gcode("📷 Photo de référence prise.")
+    else:
+        capture_reference()
     if game_engine.is_game_over():
         status_msg = f"Robot a joué {move.uci()}. Partie terminée !"
     else:
@@ -1908,13 +1915,17 @@ def api_validate_move():
     game_engine.push_move(move)      # une pièce prise par le joueur va au cimetière (registre)
     game_engine.start_clock(game_engine.board.turn)   # le temps du robot court : réflexion + mouvements
     log_gcode(f"JOUEUR JOUE : {move.uci()} ({san}, {source})")
+    # Échec donné par le joueur : annoncé tout de suite (le robot va le parer aussitôt)
+    check = {"gives_check": game_engine.board.is_check(),
+             "check_white": game_engine.board.turn == chess.WHITE,
+             "check_ply": len(game_engine.board.move_stack)}
     if game_engine.is_game_over():
         robot_busy.release()
         status_msg = f"Vous avez joué {san}. Partie terminée !"
-        return jsonify({"status": "ok", "human": move.uci(), "san": san, "source": source, "robot": None})
+        return jsonify({"status": "ok", "human": move.uci(), "san": san, "source": source, "robot": None, **check})
     reply = start_robot_reply()
     return jsonify({"status": "ok", "human": move.uci(), "san": san, "source": source,
-                    "robot": reply.uci() if reply else None})
+                    "robot": reply.uci() if reply else None, **check})
 
 
 @app.route('/api/vision/calibrate', methods=['POST'])
@@ -2736,7 +2747,7 @@ def _leg_check(board_before, move):
         log_gcode("⚠️ Légendaire, prise ratée : " + describe_failure(res[0], res[1]))
         return False
     leg_retry = None
-    leg_ref_frame = grab_stable_frame()
+    leg_ref_frame = res[2] if res is not None else grab_stable_frame()
     return True
 
 

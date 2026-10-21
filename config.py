@@ -134,7 +134,7 @@ BOARD_CORNERS = None          # Sera calibré avec les 4 dames noires
 # Calibration : 4 dames noires posées sur a1, h1, a8, h8 (les cimetières sont hors du champ caméra)
 VISION_CALIB_SQUARES = True    # False = anciennes marques au centre des 4 cases d'angle de la grille 10x10
 VISION_DIFF_THRESHOLD = 18     # Écart moyen (0-255) au-delà duquel une case est "modifiée"
-VISION_SETTLE_SEC     = 1.0    # Pause après arrivée en position caméra (vibrations) avant la photo
+VISION_SETTLE_SEC     = 0.6    # Pause après arrivée en position caméra (vibrations) avant la photo
 LEG_VERIFY            = True   # Parties légendaires : photo après chaque coup pour vérifier la prise
 # Orientation : si les noms de cases de l'image de debug ne collent pas au vrai plateau
 VISION_FLIP_FILES = False      # inverse a↔h

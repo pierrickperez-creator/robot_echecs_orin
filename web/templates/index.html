@@ -743,6 +743,8 @@ function validateMove(uci) {
     }).then(r=>r.json()).then(d=>{
         if (d.status === 'ok') {
             closeTouch();
+            // Échec donné par le joueur (pas de robot = mat : la célébration s'en charge)
+            if (d.gives_check && d.robot) showCheck(d.check_white, d.check_ply);
             document.getElementById('status').textContent =
                 `Vous : ${d.san||d.human} (${d.source})` + (d.robot ? ` — Robot : ${d.robot}` : '');
             refreshBoard();
@@ -808,11 +810,15 @@ function toggleSound() {
 // ─── Annonce de l'échec au roi ────────────────────────────────────────────
 let checkAnnounced = -1;
 function announceCheck(d) {
-    // Une seule fois par position, et seulement quand le robot a fini de bouger
-    if (!d.check || d.game_over || d.robot_busy || d.move_count === checkAnnounced) return;
-    checkAnnounced = d.move_count;
+    // Échec donné par le robot : annoncé quand il a fini de bouger (une fois par position)
+    if (!d.check || d.game_over || d.robot_busy) return;
+    showCheck(d.check_white, d.move_count);
+}
+function showCheck(whiteInCheck, ply) {
+    if (ply === checkAnnounced) return;
+    checkAnnounced = ply;
     const el = document.getElementById('check-banner');
-    el.textContent = d.check_white ? '♔ ÉCHEC AU ROI BLANC !' : '♚ ÉCHEC AU ROI NOIR !';
+    el.textContent = whiteInCheck ? '♔ ÉCHEC AU ROI BLANC !' : '♚ ÉCHEC AU ROI NOIR !';
     el.classList.add('show');
     clearTimeout(el._t);
     el._t = setTimeout(() => el.classList.remove('show'), 3000);
