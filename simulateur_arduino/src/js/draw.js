@@ -285,6 +285,59 @@
     return s;
   }
 
+  function diodeArt() {
+    return `<line x1="0" y1="0" x2="40" y2="0" stroke="#9e9e9e" stroke-width="1.6"/>` +
+      `<rect x="10" y="-4" width="20" height="8" rx="1.5" fill="#212121"/><rect x="25" y="-4" width="3" height="8" fill="#cfd8dc"/>`;
+  }
+  function npnArt() {
+    return `<path d="M0 0 V-8 M10 0 V-8 M20 0 V-8" stroke="#a5a5a5" stroke-width="1.6"/>` +
+      `<path d="M-4 -8 h28 v-8 a14 12 0 0 0 -28 0z" fill="#212121"/>` +
+      `<text x="10" y="-12" font-size="4" fill="#bbb" text-anchor="middle">2N2222</text>` +
+      `<text x="0" y="6" font-size="4" fill="#333" text-anchor="middle">E</text><text x="10" y="6" font-size="4" fill="#333" text-anchor="middle">B</text><text x="20" y="6" font-size="4" fill="#333" text-anchor="middle">C</text>`;
+  }
+  function npnDyn(comp) {
+    if (comp.rt && comp.rt.burned) return `<path d="M-2 -28 l24 22 M22 -28 l-24 22" stroke="#ff5722" stroke-width="1.8"/>`;
+    return '';
+  }
+  // segments de l'afficheur : a b c d e f g (et le point) dans un boîtier de 40 × 60
+  const SEG7 = [[6, -16, 18, 3.5], [24.5, -14.5, 3.5, 17], [24.5, 5.5, 3.5, 17], [6, 23, 18, 3.5], [2, 5.5, 3.5, 17], [2, -14.5, 3.5, 17], [6, 3.3, 18, 3.5]];
+  function sevensegArt(comp) {
+    let s = `<rect x="-7" y="-22" width="54" height="74" rx="2" fill="#2b2b2b" stroke="#111"/>`;
+    s += `<g transform="translate(5 0)">` + SEG7.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5" fill="#4a1f1f"/>`).join('') +
+      `<circle cx="33" cy="25" r="2.2" fill="#4a1f1f"/></g>`;
+    s += ['g', 'f', '−', 'a', 'b'].map((l, i) => `<text x="${i * 10}" y="-24" font-size="4" fill="#555" text-anchor="middle">${l}</text>`).join('');
+    s += ['e', 'd', '−', 'c', '.'].map((l, i) => `<text x="${i * 10}" y="58" font-size="4" fill="#555" text-anchor="middle">${l}</text>`).join('');
+    return s;
+  }
+  function sevensegDyn(comp) {
+    if (comp.rt && comp.rt.burned) return `<path d="M-4 -18 l48 64 M44 -18 l-48 64" stroke="#ff5722" stroke-width="2"/>`;
+    const b = (comp.rt && comp.rt.bright) || [];
+    let s = '<g transform="translate(5 0)">';
+    SEG7.forEach(([x, y, w, h], i) => { if (b[i] > 0.02) s += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5" fill="#ff2a2a" opacity="${0.4 + 0.6 * b[i]}"/>`; });
+    if (b[7] > 0.02) s += `<circle cx="33" cy="25" r="2.2" fill="#ff2a2a"/>`;
+    return s + '</g>';
+  }
+  function multimeterArt() {
+    let s = `<rect x="-30" y="-150" width="100" height="140" rx="10" fill="#f9a825" stroke="#c17900"/>`;
+    s += `<rect x="-20" y="-140" width="80" height="34" rx="3" fill="#cfd8b0" stroke="#7a8060"/>`;
+    s += `<circle cx="20" cy="-70" r="22" fill="#424242"/><circle cx="20" cy="-70" r="16" fill="#616161"/>`;
+    s += `<text x="20" y="-98" font-size="6" text-anchor="middle" fill="#3e2723">V⎓</text><text x="44" y="-66" font-size="6" fill="#3e2723">mA</text>`;
+    s += [['A', 0], ['COM', 20], ['V', 40]].map(([l, x]) => `<circle cx="${x}" cy="-20" r="5" fill="${l === 'COM' ? '#212121' : '#c62828'}"/><text x="${x}" y="-29" font-size="5" text-anchor="middle" fill="#3e2723">${l}</text>`).join('');
+    s += `<path d="M0 -15 V0 M20 -15 V0 M40 -15 V0" stroke="#555" stroke-width="1.5"/>`;
+    return s;
+  }
+  function multimeterDyn(comp, running) {
+    const mode = (comp.sim && comp.sim.mode) || 'V';
+    let txt = '- - -';
+    if (running && comp.rt) {
+      if (mode === 'V' && comp.rt.volts !== undefined) txt = comp.rt.volts.toFixed(2) + ' V';
+      if (mode === 'A' && comp.rt.amps !== undefined) txt = (comp.rt.amps * 1000).toFixed(1) + ' mA';
+    }
+    const ang = mode === 'V' ? -60 : 60;
+    return `<text x="20" y="-115" font-size="15" font-family="Consolas, monospace" text-anchor="middle" fill="#263238">${txt}</text>` +
+      `<g transform="rotate(${ang} 20 -70)"><rect x="18.5" y="-90" width="3" height="18" fill="#fafafa"/></g>`;
+  }
+
   /* ---------------------------------------------------------------- modules Grove */
   const ICONS = {
     button: '<circle cx="0" cy="0" r="11" fill="#424242"/><circle cx="0" cy="0" r="7.5" fill="#212121"/>',
@@ -598,6 +651,10 @@
       case 'servo': return servoArt(comp);
       case 'dcmotor': return dcmotorArt();
       case 'hcsr04': return hcsr04Art();
+      case 'diode': return diodeArt();
+      case 'npn': return npnArt();
+      case 'sevenseg': return sevensegArt(comp);
+      case 'multimeter': return multimeterArt();
       case 'lcd': return lcdArt(comp, g);
       case 'oled': return oledArt(comp, g);
       case 'tm1637': return tmArt(comp, g);
@@ -623,6 +680,10 @@
       case 'hcsr04': return `<text x="15" y="-56" font-size="6" fill="#1565c0" text-anchor="middle">${fmt(comp.sim && comp.sim.value)} cm</text>`;
       case 'ldr': return `<text x="5" y="-30" font-size="5" fill="#ef6c00" text-anchor="middle">${fmt(comp.sim && comp.sim.value)} %</text>`;
       case 'ntc': return `<text x="5" y="-30" font-size="5" fill="#5d4037" text-anchor="middle">${fmt(comp.sim && comp.sim.value)} °C</text>`;
+      case 'npn': return npnDyn(comp);
+      case 'sevenseg': return sevensegDyn(comp);
+      case 'multimeter': return multimeterDyn(comp, running);
+      case 'diode': return '';
       case 'lcd': return lcdDyn(comp, g, running);
       case 'oled': return oledDyn(comp, g, running);
       case 'tm1637': return tmDyn(comp, g, running);

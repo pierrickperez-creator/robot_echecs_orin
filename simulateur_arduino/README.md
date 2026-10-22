@@ -5,8 +5,9 @@ Un simulateur de circuits Arduino inspiré de Tinkercad Circuits, pensé pour la
 - **un seul fichier** `dist/simulateur_arduino.html` à copier sur les postes, une clé USB ou l'ENT,
   qui s'ouvre par double-clic dans **Google Chrome** ou **Microsoft Edge**, **sans Internet ni installation** ;
 - cartes **Arduino Uno, Nano et Mega 2560**, avec ou sans **shield Grove** ;
-- **plus de 110 composants**, dont **95 modules Grove** (boutons, capteurs, LED, écrans LCD/OLED, afficheur 4 chiffres,
-  servomoteur, ultrasons, DHT, baromètre, accéléromètre, rubans de LED…), et des composants de base pour plaque d'essai ;
+- **plus de 115 composants**, dont **95 modules Grove** (boutons, capteurs, LED, écrans LCD/OLED, afficheur 4 chiffres,
+  servomoteur, ultrasons, DHT, baromètre, accéléromètre, rubans de LED…), et des composants de base pour plaque d'essai
+  (résistances, LED, boutons, potentiomètre, diode, transistor NPN, moteur, afficheur 7 segments, **multimètre**…) ;
 - programmation par **blocs** (Blockly, en français), avec le **code Arduino C++ équivalent** affiché et exportable en `.ino` ;
 - simulation **électrique** (loi d'Ohm : une LED sans résistance grille, court-circuit, broche surchargée, entrée flottante)
   et **logique** des modules Grove ; **moniteur série** et **traceur série** ;

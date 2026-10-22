@@ -2,7 +2,7 @@
 
 Fichier généré par `node tools/gen_modules_md.js`. « Carte réelle » indique si le micrologiciel téléversé sait piloter le module (Uno/Nano : mémoire limitée ; certains pilotes ne sont présents que sur la Mega).
 
-Total : **130 composants**, dont **112 modules Grove**.
+Total : **134 composants**, dont **112 modules Grove**.
 
 ## Composants de base
 
@@ -25,6 +25,10 @@ Total : **130 composants**, dont **112 modules Grove**.
 | Buzzer piézo | — | oui | oui |  |
 | Servomoteur | — | oui | oui |  |
 | Moteur à courant continu | — | oui | oui |  |
+| Diode 1N4007 | — | oui | oui |  |
+| Transistor NPN (2N2222) | — | oui | oui |  |
+| Afficheur 7 segments | — | oui | oui |  |
+| Multimètre | — | oui | oui |  |
 | Capteur ultrason HC-SR04 | — | oui | oui |  |
 
 ## Grove – Boutons et détecteurs

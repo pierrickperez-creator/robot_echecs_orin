@@ -3049,6 +3049,14 @@ const FONT5X7 = [0,0,0,0,0,0,0,95,0,0,0,7,0,7,0,20,127,20,127,20,36,42,127,42,18
     desc: 'Fils : marron = GND, rouge = 5 V, orange = signal. Angle de 0 à 180°.' });
   add({ type: 'dcmotor', name: 'Moteur à courant continu', group: BASE, kind: 'dcmotor', draw: 'dcmotor',
     desc: 'Tourne d\'autant plus vite que la tension est grande. Une broche Arduino ne suffit pas (courant trop fort) !' });
+  add({ type: 'diode', name: 'Diode 1N4007', group: BASE, kind: 'diode', draw: 'diode',
+    desc: 'Ne laisse passer le courant que dans un sens (de l\'anode vers la cathode, repérée par la bague). Seuil ≈ 0,7 V.' });
+  add({ type: 'npn', name: 'Transistor NPN (2N2222)', group: BASE, kind: 'npn', draw: 'npn', props: { beta: 100 },
+    desc: 'Pattes E, B, C (face plate vers soi). Un petit courant de base commande un courant de collecteur jusqu\'à β = 100 fois plus grand.' });
+  add({ type: 'sevenseg', name: 'Afficheur 7 segments', group: BASE, kind: 'sevenseg', draw: 'sevenseg', props: { common: 'cathode' },
+    desc: 'Huit LED (a à g et le point). Broches du haut : g f COM a b ; du bas : e d COM c DP. Une résistance par segment !' });
+  add({ type: 'multimeter', name: 'Multimètre', group: BASE, kind: 'meter', draw: 'multimeter', sim: { mode: 'V' },
+    desc: 'Voltmètre (bornes V et COM, en parallèle) ou ampèremètre (bornes A et COM, en série). Choisissez le calibre dans le panneau.' });
   add({ type: 'hcsr04', name: 'Capteur ultrason HC-SR04', group: BASE, kind: 'hcsr04', draw: 'hcsr04',
     sim: { value: 50 }, desc: 'Broches VCC, Trig, Echo, GND. Mesure de 2 à 400 cm.' });
 
@@ -3323,6 +3331,14 @@ const FONT5X7 = [0,0,0,0,0,0,0,95,0,0,0,7,0,7,0,20,127,20,127,20,36,42,127,42,18
     servo: { w: 90, h: 70, ox: -35, oy: -66, pins: [{ id: 'GND', x: 0, y: 0, label: 'GND (marron)' }, { id: 'VCC', x: 10, y: 0, label: '5 V (rouge)' },
       { id: 'SIG', x: 20, y: 0, label: 'signal (orange)' }] },
     dcmotor: { w: 60, h: 60, ox: -20, oy: -56, pins: [{ id: '1', x: 0, y: 0 }, { id: '2', x: 20, y: 0 }] },
+    diode: { w: 40, h: 12, ox: 0, oy: -6, pins: [{ id: 'A', x: 0, y: 0, label: 'anode' }, { id: 'K', x: 40, y: 0, label: 'cathode (bague)' }] },
+    npn: { w: 30, h: 30, ox: -5, oy: -26, pins: [{ id: 'E', x: 0, y: 0, label: 'émetteur (E)' }, { id: 'B', x: 10, y: 0, label: 'base (B)' },
+      { id: 'C', x: 20, y: 0, label: 'collecteur (C)' }] },
+    sevenseg: { w: 60, h: 80, ox: -10, oy: -25, pins: [
+      { id: 'g', x: 0, y: 0, label: 'g' }, { id: 'f', x: 10, y: 0, label: 'f' }, { id: 'COM1', x: 20, y: 0, label: 'commun' }, { id: 'a', x: 30, y: 0, label: 'a' }, { id: 'b', x: 40, y: 0, label: 'b' },
+      { id: 'e', x: 0, y: 30, label: 'e' }, { id: 'd', x: 10, y: 30, label: 'd' }, { id: 'COM2', x: 20, y: 30, label: 'commun' }, { id: 'c', x: 30, y: 30, label: 'c' }, { id: 'dp', x: 40, y: 30, label: 'point' }] },
+    multimeter: { w: 100, h: 150, ox: -30, oy: -150, pins: [{ id: 'A', x: 0, y: 0, label: 'A (ampèremètre)' }, { id: 'COM', x: 20, y: 0, label: 'COM' },
+      { id: 'V', x: 40, y: 0, label: 'V (voltmètre)' }] },
     hcsr04: { w: 120, h: 60, ox: -45, oy: -56, pins: [{ id: 'VCC', x: 0, y: 0, label: 'VCC' }, { id: 'TRIG', x: 10, y: 0, label: 'Trig' },
       { id: 'ECHO', x: 20, y: 0, label: 'Echo' }, { id: 'GND', x: 30, y: 0, label: 'GND' }] }
   };
@@ -4222,7 +4238,7 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
   }
 
   // liaisons internes permanentes de certaines pièces
-  const INTERNAL = { pushbutton: [['1a', '1b'], ['2a', '2b']] };
+  const INTERNAL = { pushbutton: [['1a', '1b'], ['2a', '2b']], sevenseg: [['COM1', 'COM2']] };
 
   function buildNetlist(circuit) {
     const uf = new UnionFind();
@@ -4275,6 +4291,8 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
   /* ================================================================ résolution électrique */
   // éléments : { t: 'g', a, b, g } conductance ; { t: 'v', a, b, v, g } source v (+ en a) avec conductance série g ;
   //            { t: 'd', a, b, vf, rs } diode (anode a)
+  // q : transistor NPN { nc, nb, ne, beta } — modèle par morceaux : bloqué, linéaire (Ic = β·Ib), saturé (Vce = 0,2 V)
+  const RBE = 30, VBE = 0.7, VCESAT = 0.2;
   function solveElements(nNets, ground, elements) {
     const used = new Map();
     const idx = n => {
@@ -4282,19 +4300,22 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
       if (!used.has(n)) used.set(n, used.size);
       return used.get(n);
     };
-    for (const e of elements) { e._a = idx(e.a); e._b = idx(e.b); }
+    for (const e of elements) {
+      if (e.t === 'q') { e._c = idx(e.nc); e._bb = idx(e.nb); e._e = idx(e.ne); }
+      else { e._a = idx(e.a); e._b = idx(e.b); }
+    }
     const n = used.size;
     const diodes = elements.filter(e => e.t === 'd');
     diodes.forEach(d => { if (d.on === undefined) d.on = false; });
+    const trans = elements.filter(e => e.t === 'q');
+    trans.forEach(q => { if (!q.state) q.state = 'off'; });
     let V = new Float64Array(n);
-    for (let iter = 0; iter < 25; iter++) {
+    const at = i => (i >= 0 ? V[i] : 0);
+    for (let iter = 0; iter < 40; iter++) {
       const G = new Float64Array(n * n);
       const I = new Float64Array(n);
-      const stampG = (a, b, g) => {
-        if (a >= 0) G[a * n + a] += g;
-        if (b >= 0) G[b * n + b] += g;
-        if (a >= 0 && b >= 0) { G[a * n + b] -= g; G[b * n + a] -= g; }
-      };
+      const add = (r, c, g) => { if (r >= 0 && c >= 0) G[r * n + c] += g; };
+      const stampG = (a, b, g) => { add(a, a, g); add(b, b, g); add(a, b, -g); add(b, a, -g); };
       const stampV = (a, b, v, g) => {
         stampG(a, b, g);
         if (a >= 0) I[a] += v * g;
@@ -4307,14 +4328,35 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
         else if (e.t === 'd') {
           if (e.on) stampV(e._a, e._b, e.vf, 1 / e.rs);
           else stampG(e._a, e._b, 1e-9);
+        } else if (e.t === 'q') {
+          const c = e._c, b = e._bb, em = e._e;
+          if (e.state === 'off') { stampG(b, em, 1e-9); stampG(c, em, 1e-9); continue; }
+          stampV(b, em, VBE, 1 / RBE);
+          if (e.state === 'sat') { stampV(c, em, VCESAT, 1); continue; }
+          // source de courant commandée : Ic = β·(Vb − Ve − 0,7)/Rbe, de C vers E
+          const gm = e.beta / RBE;
+          add(c, b, gm); add(c, em, -gm); add(em, b, -gm); add(em, em, gm);
+          if (c >= 0) I[c] += gm * VBE;
+          if (em >= 0) I[em] -= gm * VBE;
+          stampG(c, em, 1e-7);
         }
       }
       V = gauss(G, I, n);
       let changed = false;
       for (const d of diodes) {
-        const vd = (d._a >= 0 ? V[d._a] : 0) - (d._b >= 0 ? V[d._b] : 0);
+        const vd = at(d._a) - at(d._b);
         if (!d.on && vd > d.vf + 1e-6) { d.on = true; changed = true; }
         else if (d.on && vd < d.vf - 1e-6) { d.on = false; changed = true; }
+      }
+      for (const q of trans) {
+        const vbe = at(q._bb) - at(q._e), vce = at(q._c) - at(q._e);
+        const ib = (vbe - VBE) / RBE;
+        let st = q.state;
+        if (st === 'off') { if (vbe > VBE + 1e-6) st = 'act'; }
+        else if (ib <= 0) st = 'off';
+        else if (st === 'act' && vce < VCESAT) st = 'sat';
+        else if (st === 'sat' && (vce - VCESAT) * 1 > q.beta * ib) st = 'act';
+        if (st !== q.state) { q.state = st; changed = true; }
       }
       if (!changed) break;
     }
@@ -4323,6 +4365,12 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     const vOf = x => (x === undefined ? 0 : volt[x]);
     // courants des éléments
     for (const e of elements) {
+      if (e.t === 'q') {
+        const vbe = vOf(e.nb) - vOf(e.ne), vce = vOf(e.nc) - vOf(e.ne);
+        e.ib = e.state === 'off' ? 0 : Math.max(0, (vbe - VBE) / RBE);
+        e.i = e.state === 'off' ? 0 : e.state === 'sat' ? (vce - VCESAT) : e.beta * e.ib;
+        continue;
+      }
       const vd = vOf(e.a) - vOf(e.b);
       if (e.t === 'g') e.i = vd * e.g;
       else if (e.t === 'v') e.i = (e.v - vd) * e.g;  // courant sortant par la borne +
@@ -4880,6 +4928,20 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
             E.push({ t: 'g', a: P('TRIG'), b: P('GND'), g: 1e-6 });
             if (this.powered(comp)) add({ t: 'v', a: P('ECHO'), b: P('GND'), v: 0, g: 1 / 100, comp });
             break;
+          case 'diode': add({ t: 'd', a: P('A'), b: P('K'), vf: 0.7, rs: 0.5, comp, diode: true }); break;
+          case 'npn': if (!comp.rt.burned) add({ t: 'q', nc: P('C'), nb: P('B'), ne: P('E'), beta: +props.beta || 100, comp, a: P('C'), b: P('E') }); break;
+          case 'sevenseg':
+            if (!comp.rt.burned) {
+              ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'].forEach((seg, i) => {
+                const anode = props.common === 'anode';
+                add({ t: 'd', a: anode ? P('COM1') : P(seg), b: anode ? P(seg) : P('COM1'), vf: 1.9, rs: 12, comp, led: i });
+              });
+            }
+            break;
+          case 'meter':
+            E.push({ t: 'g', a: P('V'), b: P('COM'), g: 1e-7, comp, meterV: true });
+            add({ t: 'g', a: P('A'), b: P('COM'), g: 10, comp, meterA: true });
+            break;
           case 'breadboard': break;
           default: this.groveElements(comp, def, P, add, E);
         }
@@ -4968,7 +5030,12 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
         if (e.pin !== undefined && !e.pullup && Math.abs(e.i) * 1000 > PIN_MAX_MA) {
           this.warn('over' + e.pin, `Courant trop fort sur la broche ${this.board.pinName(e.pin)} (${Math.round(Math.abs(e.i) * 1000)} mA, maximum ${PIN_MAX_MA} mA) : la broche risque d'être détruite. Ajoutez une résistance ou un transistor.`, 'error');
         }
-        if (e.t === 'd' && e.comp && e.i * 1000 > LED_MAX_MA && !e.comp.rt.burned) {
+        if (e.t === 'q' && e.i > 0.6 && !e.comp.rt.burned) {
+          e.comp.rt.burned = true;
+          this.warn('burnq' + e.comp.id, `Le transistor a chauffé et s'est détruit (${Math.round(e.i * 1000)} mA, maximum 600 mA).`, 'error');
+        }
+        if (e.meterA && Math.abs(e.i) > 10) this.warn('amm' + e.comp.id, 'L\'ampèremètre est branché en parallèle : il crée un court-circuit ! Branchez-le en série (bornes A et COM).', 'error');
+        if (e.t === 'd' && e.comp && !e.diode && e.i * 1000 > LED_MAX_MA && !e.comp.rt.burned) {
           e.comp.rt.burned = true;
           this.warn('burn' + e.comp.id, `La LED a grillé (${Math.round(e.i * 1000)} mA) ! Il faut une résistance en série (220 Ω par exemple).`, 'error');
           this.version++;
@@ -4984,12 +5051,14 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
       const N = this.net;
       const ledCur = new Map();
       for (const e of this.elements) {
-        if (e.t === 'd' && e.comp) {
-          const arr = ledCur.get(e.comp) || [0, 0, 0];
+        if (e.t === 'd' && e.comp && e.led !== undefined) {
+          const arr = ledCur.get(e.comp) || [0, 0, 0, 0, 0, 0, 0, 0];
           arr[e.led] = Math.max(0, e.i);
           ledCur.set(e.comp, arr);
         }
         if (e.motor) e.comp.rt.motor = e.i;
+        if (e.meterV) e.comp.rt.volts = (v[e.a] || 0) - (v[e.b] || 0);
+        if (e.meterA) e.comp.rt.amps = e.i;
       }
       this.sounds = [];
       for (const comp of this.c.comps) {
@@ -4998,8 +5067,8 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
         const rt = comp.rt;
         const P = id => N.pin(comp.id, id);
         switch (def.kind) {
-          case 'led': case 'rgbled': {
-            const c = ledCur.get(comp) || [0, 0, 0];
+          case 'led': case 'rgbled': case 'sevenseg': {
+            const c = ledCur.get(comp) || [0, 0, 0, 0, 0, 0, 0, 0];
             rt.bright = c.map(i => Math.min(1, i / 0.015));
             break;
           }
@@ -5360,6 +5429,59 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     return s;
   }
 
+  function diodeArt() {
+    return `<line x1="0" y1="0" x2="40" y2="0" stroke="#9e9e9e" stroke-width="1.6"/>` +
+      `<rect x="10" y="-4" width="20" height="8" rx="1.5" fill="#212121"/><rect x="25" y="-4" width="3" height="8" fill="#cfd8dc"/>`;
+  }
+  function npnArt() {
+    return `<path d="M0 0 V-8 M10 0 V-8 M20 0 V-8" stroke="#a5a5a5" stroke-width="1.6"/>` +
+      `<path d="M-4 -8 h28 v-8 a14 12 0 0 0 -28 0z" fill="#212121"/>` +
+      `<text x="10" y="-12" font-size="4" fill="#bbb" text-anchor="middle">2N2222</text>` +
+      `<text x="0" y="6" font-size="4" fill="#333" text-anchor="middle">E</text><text x="10" y="6" font-size="4" fill="#333" text-anchor="middle">B</text><text x="20" y="6" font-size="4" fill="#333" text-anchor="middle">C</text>`;
+  }
+  function npnDyn(comp) {
+    if (comp.rt && comp.rt.burned) return `<path d="M-2 -28 l24 22 M22 -28 l-24 22" stroke="#ff5722" stroke-width="1.8"/>`;
+    return '';
+  }
+  // segments de l'afficheur : a b c d e f g (et le point) dans un boîtier de 40 × 60
+  const SEG7 = [[6, -16, 18, 3.5], [24.5, -14.5, 3.5, 17], [24.5, 5.5, 3.5, 17], [6, 23, 18, 3.5], [2, 5.5, 3.5, 17], [2, -14.5, 3.5, 17], [6, 3.3, 18, 3.5]];
+  function sevensegArt(comp) {
+    let s = `<rect x="-7" y="-22" width="54" height="74" rx="2" fill="#2b2b2b" stroke="#111"/>`;
+    s += `<g transform="translate(5 0)">` + SEG7.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5" fill="#4a1f1f"/>`).join('') +
+      `<circle cx="33" cy="25" r="2.2" fill="#4a1f1f"/></g>`;
+    s += ['g', 'f', '−', 'a', 'b'].map((l, i) => `<text x="${i * 10}" y="-24" font-size="4" fill="#555" text-anchor="middle">${l}</text>`).join('');
+    s += ['e', 'd', '−', 'c', '.'].map((l, i) => `<text x="${i * 10}" y="58" font-size="4" fill="#555" text-anchor="middle">${l}</text>`).join('');
+    return s;
+  }
+  function sevensegDyn(comp) {
+    if (comp.rt && comp.rt.burned) return `<path d="M-4 -18 l48 64 M44 -18 l-48 64" stroke="#ff5722" stroke-width="2"/>`;
+    const b = (comp.rt && comp.rt.bright) || [];
+    let s = '<g transform="translate(5 0)">';
+    SEG7.forEach(([x, y, w, h], i) => { if (b[i] > 0.02) s += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5" fill="#ff2a2a" opacity="${0.4 + 0.6 * b[i]}"/>`; });
+    if (b[7] > 0.02) s += `<circle cx="33" cy="25" r="2.2" fill="#ff2a2a"/>`;
+    return s + '</g>';
+  }
+  function multimeterArt() {
+    let s = `<rect x="-30" y="-150" width="100" height="140" rx="10" fill="#f9a825" stroke="#c17900"/>`;
+    s += `<rect x="-20" y="-140" width="80" height="34" rx="3" fill="#cfd8b0" stroke="#7a8060"/>`;
+    s += `<circle cx="20" cy="-70" r="22" fill="#424242"/><circle cx="20" cy="-70" r="16" fill="#616161"/>`;
+    s += `<text x="20" y="-98" font-size="6" text-anchor="middle" fill="#3e2723">V⎓</text><text x="44" y="-66" font-size="6" fill="#3e2723">mA</text>`;
+    s += [['A', 0], ['COM', 20], ['V', 40]].map(([l, x]) => `<circle cx="${x}" cy="-20" r="5" fill="${l === 'COM' ? '#212121' : '#c62828'}"/><text x="${x}" y="-29" font-size="5" text-anchor="middle" fill="#3e2723">${l}</text>`).join('');
+    s += `<path d="M0 -15 V0 M20 -15 V0 M40 -15 V0" stroke="#555" stroke-width="1.5"/>`;
+    return s;
+  }
+  function multimeterDyn(comp, running) {
+    const mode = (comp.sim && comp.sim.mode) || 'V';
+    let txt = '- - -';
+    if (running && comp.rt) {
+      if (mode === 'V' && comp.rt.volts !== undefined) txt = comp.rt.volts.toFixed(2) + ' V';
+      if (mode === 'A' && comp.rt.amps !== undefined) txt = (comp.rt.amps * 1000).toFixed(1) + ' mA';
+    }
+    const ang = mode === 'V' ? -60 : 60;
+    return `<text x="20" y="-115" font-size="15" font-family="Consolas, monospace" text-anchor="middle" fill="#263238">${txt}</text>` +
+      `<g transform="rotate(${ang} 20 -70)"><rect x="18.5" y="-90" width="3" height="18" fill="#fafafa"/></g>`;
+  }
+
   /* ---------------------------------------------------------------- modules Grove */
   const ICONS = {
     button: '<circle cx="0" cy="0" r="11" fill="#424242"/><circle cx="0" cy="0" r="7.5" fill="#212121"/>',
@@ -5673,6 +5795,10 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
       case 'servo': return servoArt(comp);
       case 'dcmotor': return dcmotorArt();
       case 'hcsr04': return hcsr04Art();
+      case 'diode': return diodeArt();
+      case 'npn': return npnArt();
+      case 'sevenseg': return sevensegArt(comp);
+      case 'multimeter': return multimeterArt();
       case 'lcd': return lcdArt(comp, g);
       case 'oled': return oledArt(comp, g);
       case 'tm1637': return tmArt(comp, g);
@@ -5698,6 +5824,10 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
       case 'hcsr04': return `<text x="15" y="-56" font-size="6" fill="#1565c0" text-anchor="middle">${fmt(comp.sim && comp.sim.value)} cm</text>`;
       case 'ldr': return `<text x="5" y="-30" font-size="5" fill="#ef6c00" text-anchor="middle">${fmt(comp.sim && comp.sim.value)} %</text>`;
       case 'ntc': return `<text x="5" y="-30" font-size="5" fill="#5d4037" text-anchor="middle">${fmt(comp.sim && comp.sim.value)} °C</text>`;
+      case 'npn': return npnDyn(comp);
+      case 'sevenseg': return sevensegDyn(comp);
+      case 'multimeter': return multimeterDyn(comp, running);
+      case 'diode': return '';
       case 'lcd': return lcdDyn(comp, g, running);
       case 'oled': return oledDyn(comp, g, running);
       case 'tm1637': return tmDyn(comp, g, running);
@@ -8531,6 +8661,39 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
         IF0: blk('logic_compare', { OP: 'EQ' }, { A: blk('ard_digital_read', { PIN: 'D2' }), B: { block: { type: 'ard_highlow', fields: { V: '0' } } } }),
         DO0: write('D13', true), ELSE: write('D13', false) } } }, delay(10)))));
 
+  // moteur commandé par un transistor NPN, mesures au multimètre
+  {
+    const bbX = 0, bbY = 260;
+    const rows = { a: 50, b: 60, c: 70, d: 80, e: 90, f: 120, g: 130, h: 140, i: 150, j: 160 };
+    const hole = (row, col) => ({ x: bbX + 20 + (col - 1) * 10, y: bbY + rows[row] });
+    const comps = [
+      { id: 'bb', type: 'breadboard', x: bbX, y: bbY },
+      Object.assign({ id: 'q', type: 'npn' }, hole('d', 10)),
+      Object.assign({ id: 'rb', type: 'resistor', props: { ohms: 1000 } }, hole('b', 7)),
+      Object.assign({ id: 'm', type: 'dcmotor' }, hole('h', 20)),
+      Object.assign({ id: 'd', type: 'diode' }, hole('f', 20)),  // cathode (bague) côté +5 V
+      { id: 'amp', type: 'multimeter', x: 400, y: 470, sim: { mode: 'A' } },
+      { id: 'volt', type: 'multimeter', x: 400, y: 260, sim: { mode: 'V' } }
+    ];
+    const w = (id, a, b, color, pts) => ({ id, a, b, pts: pts || [], color });
+    const wires = [
+      w('w1', { c: 'board', p: 'D9' }, { c: 'bb', p: 'a7' }, '#2e7d32'),
+      w('w2', { c: 'board', p: 'GND_T' }, { c: 'bb', p: 'a10' }, '#212121', [{ x: 110, y: 240 }, { x: 110, y: 240 }]),
+      w('w3', { c: 'bb', p: 'a12' }, { c: 'bb', p: 'j20' }, '#1565c0', [{ x: 130, y: 250 }, { x: 225, y: 250 }, { x: 225, y: 440 }, { x: 210, y: 440 }]),
+      w('w4', { c: 'board', p: '5V' }, { c: 'amp', p: 'A' }, '#d32f2f', [{ x: 150, y: 230 }, { x: 370, y: 230 }, { x: 370, y: 490 }, { x: 400, y: 490 }]),
+      w('w5', { c: 'amp', p: 'COM' }, { c: 'bb', p: 'j24' }, '#d32f2f', [{ x: 420, y: 500 }, { x: 250, y: 500 }]),
+      w('w6', { c: 'bb', p: 'j22' }, { c: 'bb', p: 'i24' }, '#d32f2f'),
+      w('w7', { c: 'volt', p: 'V' }, { c: 'bb', p: 'g22' }, '#d32f2f', [{ x: 440, y: 290 }, { x: 330, y: 290 }, { x: 330, y: 390 }, { x: 230, y: 390 }]),
+      w('w8', { c: 'volt', p: 'COM' }, { c: 'bb', p: 'g20' }, '#212121', [{ x: 420, y: 280 }, { x: 320, y: 280 }, { x: 320, y: 380 }, { x: 210, y: 380 }])
+    ];
+    EX.push(project('Moteur commandé par un transistor', 'Une broche ne peut pas alimenter un moteur : le transistor NPN amplifie le courant. Le multimètre mesure courant et tension (diode de roue libre en parallèle sur le moteur).',
+      'uno', false, comps, wires, [],
+      program(null, seq(
+        blk('ard_analog_write', { PIN: 'D9' }, { VALUE: num(255) }), delay(2, 's'),
+        blk('ard_analog_write', { PIN: 'D9' }, { VALUE: num(120) }), delay(2, 's'),
+        blk('ard_analog_write', { PIN: 'D9' }, { VALUE: num(0) }), delay(2, 's')))));
+  }
+
   root.EXAMPLES = EX;
 })(this);
 
@@ -8926,6 +9089,10 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     }
     if (def.kind === 'pot') h += `<div class="row"><label>Valeur (Ω)</label><input type="number" min="100" step="100" data-prop="ohms" value="${comp.props.ohms}"></div>`;
     if (def.kind === 'chain') h += `<div class="row"><label>LED en chaîne</label><input type="number" min="1" max="10" data-prop="count" value="${comp.props.count || 1}"></div>`;
+    if (def.kind === 'sevenseg') h += `<div class="row"><label>Type</label><select data-propsel="common">
+      <option value="cathode" ${comp.props.common !== 'anode' ? 'selected' : ''}>cathode commune (COM au GND)</option>
+      <option value="anode" ${comp.props.common === 'anode' ? 'selected' : ''}>anode commune (COM au 5 V)</option></select></div>`;
+    if (def.kind === 'npn') h += `<div class="row"><label>Gain β</label><input type="number" min="10" max="1000" data-prop="beta" value="${comp.props.beta || 100}"></div>`;
     return h;
   }
   const slider = (key, label, min, max, step, unit, v) =>
@@ -8973,6 +9140,8 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
       case 'rfid': h += sect('Présenter un badge') + `<div class="btns">${[['Badge A', 0x1A2B3C], ['Badge B', 0x4D5E6F], ['Badge C', 0x778899]].map(([l, v]) => `<button class="mini" data-card="${v}">${l} (${v})</button>`).join('')}</div>`; break;
       case 'keypad': h += sect('Clavier') + `<div class="keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '*', 0, '#'].map(k => `<button class="mini" data-key="${k === '*' ? 10 : k === '#' ? 11 : k}">${k}</button>`).join('')}</div>`; break;
       case 'rtc': h += `<p class="desc">L'horloge simulée suit l'heure de l'ordinateur (réglable par le programme).</p>`; break;
+      case 'meter': h += sect('Calibre') + `<div class="row"><button class="mini ${s.mode !== 'A' ? 'on' : ''}" data-meter="V">Voltmètre (V)</button><button class="mini ${s.mode === 'A' ? 'on' : ''}" data-meter="A">Ampèremètre (mA)</button></div>
+        <p class="desc">${s.mode === 'A' ? 'Branchez A et COM <b>en série</b> dans le circuit.' : 'Branchez V et COM <b>en parallèle</b> sur le dipôle à mesurer.'}</p>`; break;
     }
     return h;
   }
@@ -9014,6 +9183,15 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
       if (p === 'shake') Object.assign(comp.sim, { x: 1.6, y: -1.2, z: 1.9 });
       if (p === 'center') Object.assign(comp.sim, { x: 512, y: 512 });
       live(); renderProps(editor.sel);
+    });
+    box.querySelectorAll('[data-meter]').forEach(b => b.onclick = () => { comp.sim.mode = b.dataset.meter; live(); renderProps(editor.sel); });
+    box.querySelectorAll('[data-propsel]').forEach(sel => sel.onchange = () => {
+      if (!guardLock()) return;
+      editor.pushUndo();
+      comp.props[sel.dataset.propsel] = sel.value;
+      editor.refreshComp(comp);
+      stopSimForEdit();
+      autosave();
     });
     box.querySelectorAll('[data-gesture]').forEach(b => b.onclick = () => { comp.rt.gesture = +b.dataset.gesture; live(); });
     box.querySelectorAll('[data-enc]').forEach(b => b.onclick = () => {

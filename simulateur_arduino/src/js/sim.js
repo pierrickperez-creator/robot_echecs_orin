@@ -27,7 +27,7 @@
   }
 
   // liaisons internes permanentes de certaines pièces
-  const INTERNAL = { pushbutton: [['1a', '1b'], ['2a', '2b']] };
+  const INTERNAL = { pushbutton: [['1a', '1b'], ['2a', '2b']], sevenseg: [['COM1', 'COM2']] };
 
   function buildNetlist(circuit) {
     const uf = new UnionFind();
@@ -80,6 +80,8 @@
   /* ================================================================ résolution électrique */
   // éléments : { t: 'g', a, b, g } conductance ; { t: 'v', a, b, v, g } source v (+ en a) avec conductance série g ;
   //            { t: 'd', a, b, vf, rs } diode (anode a)
+  // q : transistor NPN { nc, nb, ne, beta } — modèle par morceaux : bloqué, linéaire (Ic = β·Ib), saturé (Vce = 0,2 V)
+  const RBE = 30, VBE = 0.7, VCESAT = 0.2;
   function solveElements(nNets, ground, elements) {
     const used = new Map();
     const idx = n => {
@@ -87,19 +89,22 @@
       if (!used.has(n)) used.set(n, used.size);
       return used.get(n);
     };
-    for (const e of elements) { e._a = idx(e.a); e._b = idx(e.b); }
+    for (const e of elements) {
+      if (e.t === 'q') { e._c = idx(e.nc); e._bb = idx(e.nb); e._e = idx(e.ne); }
+      else { e._a = idx(e.a); e._b = idx(e.b); }
+    }
     const n = used.size;
     const diodes = elements.filter(e => e.t === 'd');
     diodes.forEach(d => { if (d.on === undefined) d.on = false; });
+    const trans = elements.filter(e => e.t === 'q');
+    trans.forEach(q => { if (!q.state) q.state = 'off'; });
     let V = new Float64Array(n);
-    for (let iter = 0; iter < 25; iter++) {
+    const at = i => (i >= 0 ? V[i] : 0);
+    for (let iter = 0; iter < 40; iter++) {
       const G = new Float64Array(n * n);
       const I = new Float64Array(n);
-      const stampG = (a, b, g) => {
-        if (a >= 0) G[a * n + a] += g;
-        if (b >= 0) G[b * n + b] += g;
-        if (a >= 0 && b >= 0) { G[a * n + b] -= g; G[b * n + a] -= g; }
-      };
+      const add = (r, c, g) => { if (r >= 0 && c >= 0) G[r * n + c] += g; };
+      const stampG = (a, b, g) => { add(a, a, g); add(b, b, g); add(a, b, -g); add(b, a, -g); };
       const stampV = (a, b, v, g) => {
         stampG(a, b, g);
         if (a >= 0) I[a] += v * g;
@@ -112,14 +117,35 @@
         else if (e.t === 'd') {
           if (e.on) stampV(e._a, e._b, e.vf, 1 / e.rs);
           else stampG(e._a, e._b, 1e-9);
+        } else if (e.t === 'q') {
+          const c = e._c, b = e._bb, em = e._e;
+          if (e.state === 'off') { stampG(b, em, 1e-9); stampG(c, em, 1e-9); continue; }
+          stampV(b, em, VBE, 1 / RBE);
+          if (e.state === 'sat') { stampV(c, em, VCESAT, 1); continue; }
+          // source de courant commandée : Ic = β·(Vb − Ve − 0,7)/Rbe, de C vers E
+          const gm = e.beta / RBE;
+          add(c, b, gm); add(c, em, -gm); add(em, b, -gm); add(em, em, gm);
+          if (c >= 0) I[c] += gm * VBE;
+          if (em >= 0) I[em] -= gm * VBE;
+          stampG(c, em, 1e-7);
         }
       }
       V = gauss(G, I, n);
       let changed = false;
       for (const d of diodes) {
-        const vd = (d._a >= 0 ? V[d._a] : 0) - (d._b >= 0 ? V[d._b] : 0);
+        const vd = at(d._a) - at(d._b);
         if (!d.on && vd > d.vf + 1e-6) { d.on = true; changed = true; }
         else if (d.on && vd < d.vf - 1e-6) { d.on = false; changed = true; }
+      }
+      for (const q of trans) {
+        const vbe = at(q._bb) - at(q._e), vce = at(q._c) - at(q._e);
+        const ib = (vbe - VBE) / RBE;
+        let st = q.state;
+        if (st === 'off') { if (vbe > VBE + 1e-6) st = 'act'; }
+        else if (ib <= 0) st = 'off';
+        else if (st === 'act' && vce < VCESAT) st = 'sat';
+        else if (st === 'sat' && (vce - VCESAT) * 1 > q.beta * ib) st = 'act';
+        if (st !== q.state) { q.state = st; changed = true; }
       }
       if (!changed) break;
     }
@@ -128,6 +154,12 @@
     const vOf = x => (x === undefined ? 0 : volt[x]);
     // courants des éléments
     for (const e of elements) {
+      if (e.t === 'q') {
+        const vbe = vOf(e.nb) - vOf(e.ne), vce = vOf(e.nc) - vOf(e.ne);
+        e.ib = e.state === 'off' ? 0 : Math.max(0, (vbe - VBE) / RBE);
+        e.i = e.state === 'off' ? 0 : e.state === 'sat' ? (vce - VCESAT) : e.beta * e.ib;
+        continue;
+      }
       const vd = vOf(e.a) - vOf(e.b);
       if (e.t === 'g') e.i = vd * e.g;
       else if (e.t === 'v') e.i = (e.v - vd) * e.g;  // courant sortant par la borne +
@@ -685,6 +717,20 @@
             E.push({ t: 'g', a: P('TRIG'), b: P('GND'), g: 1e-6 });
             if (this.powered(comp)) add({ t: 'v', a: P('ECHO'), b: P('GND'), v: 0, g: 1 / 100, comp });
             break;
+          case 'diode': add({ t: 'd', a: P('A'), b: P('K'), vf: 0.7, rs: 0.5, comp, diode: true }); break;
+          case 'npn': if (!comp.rt.burned) add({ t: 'q', nc: P('C'), nb: P('B'), ne: P('E'), beta: +props.beta || 100, comp, a: P('C'), b: P('E') }); break;
+          case 'sevenseg':
+            if (!comp.rt.burned) {
+              ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'].forEach((seg, i) => {
+                const anode = props.common === 'anode';
+                add({ t: 'd', a: anode ? P('COM1') : P(seg), b: anode ? P(seg) : P('COM1'), vf: 1.9, rs: 12, comp, led: i });
+              });
+            }
+            break;
+          case 'meter':
+            E.push({ t: 'g', a: P('V'), b: P('COM'), g: 1e-7, comp, meterV: true });
+            add({ t: 'g', a: P('A'), b: P('COM'), g: 10, comp, meterA: true });
+            break;
           case 'breadboard': break;
           default: this.groveElements(comp, def, P, add, E);
         }
@@ -773,7 +819,12 @@
         if (e.pin !== undefined && !e.pullup && Math.abs(e.i) * 1000 > PIN_MAX_MA) {
           this.warn('over' + e.pin, `Courant trop fort sur la broche ${this.board.pinName(e.pin)} (${Math.round(Math.abs(e.i) * 1000)} mA, maximum ${PIN_MAX_MA} mA) : la broche risque d'être détruite. Ajoutez une résistance ou un transistor.`, 'error');
         }
-        if (e.t === 'd' && e.comp && e.i * 1000 > LED_MAX_MA && !e.comp.rt.burned) {
+        if (e.t === 'q' && e.i > 0.6 && !e.comp.rt.burned) {
+          e.comp.rt.burned = true;
+          this.warn('burnq' + e.comp.id, `Le transistor a chauffé et s'est détruit (${Math.round(e.i * 1000)} mA, maximum 600 mA).`, 'error');
+        }
+        if (e.meterA && Math.abs(e.i) > 10) this.warn('amm' + e.comp.id, 'L\'ampèremètre est branché en parallèle : il crée un court-circuit ! Branchez-le en série (bornes A et COM).', 'error');
+        if (e.t === 'd' && e.comp && !e.diode && e.i * 1000 > LED_MAX_MA && !e.comp.rt.burned) {
           e.comp.rt.burned = true;
           this.warn('burn' + e.comp.id, `La LED a grillé (${Math.round(e.i * 1000)} mA) ! Il faut une résistance en série (220 Ω par exemple).`, 'error');
           this.version++;
@@ -789,12 +840,14 @@
       const N = this.net;
       const ledCur = new Map();
       for (const e of this.elements) {
-        if (e.t === 'd' && e.comp) {
-          const arr = ledCur.get(e.comp) || [0, 0, 0];
+        if (e.t === 'd' && e.comp && e.led !== undefined) {
+          const arr = ledCur.get(e.comp) || [0, 0, 0, 0, 0, 0, 0, 0];
           arr[e.led] = Math.max(0, e.i);
           ledCur.set(e.comp, arr);
         }
         if (e.motor) e.comp.rt.motor = e.i;
+        if (e.meterV) e.comp.rt.volts = (v[e.a] || 0) - (v[e.b] || 0);
+        if (e.meterA) e.comp.rt.amps = e.i;
       }
       this.sounds = [];
       for (const comp of this.c.comps) {
@@ -803,8 +856,8 @@
         const rt = comp.rt;
         const P = id => N.pin(comp.id, id);
         switch (def.kind) {
-          case 'led': case 'rgbled': {
-            const c = ledCur.get(comp) || [0, 0, 0];
+          case 'led': case 'rgbled': case 'sevenseg': {
+            const c = ledCur.get(comp) || [0, 0, 0, 0, 0, 0, 0, 0];
             rt.bright = c.map(i => Math.min(1, i / 0.015));
             break;
           }

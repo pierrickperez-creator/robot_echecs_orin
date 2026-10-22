@@ -388,6 +388,10 @@
     }
     if (def.kind === 'pot') h += `<div class="row"><label>Valeur (Ω)</label><input type="number" min="100" step="100" data-prop="ohms" value="${comp.props.ohms}"></div>`;
     if (def.kind === 'chain') h += `<div class="row"><label>LED en chaîne</label><input type="number" min="1" max="10" data-prop="count" value="${comp.props.count || 1}"></div>`;
+    if (def.kind === 'sevenseg') h += `<div class="row"><label>Type</label><select data-propsel="common">
+      <option value="cathode" ${comp.props.common !== 'anode' ? 'selected' : ''}>cathode commune (COM au GND)</option>
+      <option value="anode" ${comp.props.common === 'anode' ? 'selected' : ''}>anode commune (COM au 5 V)</option></select></div>`;
+    if (def.kind === 'npn') h += `<div class="row"><label>Gain β</label><input type="number" min="10" max="1000" data-prop="beta" value="${comp.props.beta || 100}"></div>`;
     return h;
   }
   const slider = (key, label, min, max, step, unit, v) =>
@@ -435,6 +439,8 @@
       case 'rfid': h += sect('Présenter un badge') + `<div class="btns">${[['Badge A', 0x1A2B3C], ['Badge B', 0x4D5E6F], ['Badge C', 0x778899]].map(([l, v]) => `<button class="mini" data-card="${v}">${l} (${v})</button>`).join('')}</div>`; break;
       case 'keypad': h += sect('Clavier') + `<div class="keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '*', 0, '#'].map(k => `<button class="mini" data-key="${k === '*' ? 10 : k === '#' ? 11 : k}">${k}</button>`).join('')}</div>`; break;
       case 'rtc': h += `<p class="desc">L'horloge simulée suit l'heure de l'ordinateur (réglable par le programme).</p>`; break;
+      case 'meter': h += sect('Calibre') + `<div class="row"><button class="mini ${s.mode !== 'A' ? 'on' : ''}" data-meter="V">Voltmètre (V)</button><button class="mini ${s.mode === 'A' ? 'on' : ''}" data-meter="A">Ampèremètre (mA)</button></div>
+        <p class="desc">${s.mode === 'A' ? 'Branchez A et COM <b>en série</b> dans le circuit.' : 'Branchez V et COM <b>en parallèle</b> sur le dipôle à mesurer.'}</p>`; break;
     }
     return h;
   }
@@ -476,6 +482,15 @@
       if (p === 'shake') Object.assign(comp.sim, { x: 1.6, y: -1.2, z: 1.9 });
       if (p === 'center') Object.assign(comp.sim, { x: 512, y: 512 });
       live(); renderProps(editor.sel);
+    });
+    box.querySelectorAll('[data-meter]').forEach(b => b.onclick = () => { comp.sim.mode = b.dataset.meter; live(); renderProps(editor.sel); });
+    box.querySelectorAll('[data-propsel]').forEach(sel => sel.onchange = () => {
+      if (!guardLock()) return;
+      editor.pushUndo();
+      comp.props[sel.dataset.propsel] = sel.value;
+      editor.refreshComp(comp);
+      stopSimForEdit();
+      autosave();
     });
     box.querySelectorAll('[data-gesture]').forEach(b => b.onclick = () => { comp.rt.gesture = +b.dataset.gesture; live(); });
     box.querySelectorAll('[data-enc]').forEach(b => b.onclick = () => {

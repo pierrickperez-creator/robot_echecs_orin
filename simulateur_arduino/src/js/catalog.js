@@ -57,6 +57,14 @@
     desc: 'Fils : marron = GND, rouge = 5 V, orange = signal. Angle de 0 à 180°.' });
   add({ type: 'dcmotor', name: 'Moteur à courant continu', group: BASE, kind: 'dcmotor', draw: 'dcmotor',
     desc: 'Tourne d\'autant plus vite que la tension est grande. Une broche Arduino ne suffit pas (courant trop fort) !' });
+  add({ type: 'diode', name: 'Diode 1N4007', group: BASE, kind: 'diode', draw: 'diode',
+    desc: 'Ne laisse passer le courant que dans un sens (de l\'anode vers la cathode, repérée par la bague). Seuil ≈ 0,7 V.' });
+  add({ type: 'npn', name: 'Transistor NPN (2N2222)', group: BASE, kind: 'npn', draw: 'npn', props: { beta: 100 },
+    desc: 'Pattes E, B, C (face plate vers soi). Un petit courant de base commande un courant de collecteur jusqu\'à β = 100 fois plus grand.' });
+  add({ type: 'sevenseg', name: 'Afficheur 7 segments', group: BASE, kind: 'sevenseg', draw: 'sevenseg', props: { common: 'cathode' },
+    desc: 'Huit LED (a à g et le point). Broches du haut : g f COM a b ; du bas : e d COM c DP. Une résistance par segment !' });
+  add({ type: 'multimeter', name: 'Multimètre', group: BASE, kind: 'meter', draw: 'multimeter', sim: { mode: 'V' },
+    desc: 'Voltmètre (bornes V et COM, en parallèle) ou ampèremètre (bornes A et COM, en série). Choisissez le calibre dans le panneau.' });
   add({ type: 'hcsr04', name: 'Capteur ultrason HC-SR04', group: BASE, kind: 'hcsr04', draw: 'hcsr04',
     sim: { value: 50 }, desc: 'Broches VCC, Trig, Echo, GND. Mesure de 2 à 400 cm.' });
 

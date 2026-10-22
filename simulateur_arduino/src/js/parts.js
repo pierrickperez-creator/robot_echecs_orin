@@ -66,6 +66,14 @@
     servo: { w: 90, h: 70, ox: -35, oy: -66, pins: [{ id: 'GND', x: 0, y: 0, label: 'GND (marron)' }, { id: 'VCC', x: 10, y: 0, label: '5 V (rouge)' },
       { id: 'SIG', x: 20, y: 0, label: 'signal (orange)' }] },
     dcmotor: { w: 60, h: 60, ox: -20, oy: -56, pins: [{ id: '1', x: 0, y: 0 }, { id: '2', x: 20, y: 0 }] },
+    diode: { w: 40, h: 12, ox: 0, oy: -6, pins: [{ id: 'A', x: 0, y: 0, label: 'anode' }, { id: 'K', x: 40, y: 0, label: 'cathode (bague)' }] },
+    npn: { w: 30, h: 30, ox: -5, oy: -26, pins: [{ id: 'E', x: 0, y: 0, label: 'émetteur (E)' }, { id: 'B', x: 10, y: 0, label: 'base (B)' },
+      { id: 'C', x: 20, y: 0, label: 'collecteur (C)' }] },
+    sevenseg: { w: 60, h: 80, ox: -10, oy: -25, pins: [
+      { id: 'g', x: 0, y: 0, label: 'g' }, { id: 'f', x: 10, y: 0, label: 'f' }, { id: 'COM1', x: 20, y: 0, label: 'commun' }, { id: 'a', x: 30, y: 0, label: 'a' }, { id: 'b', x: 40, y: 0, label: 'b' },
+      { id: 'e', x: 0, y: 30, label: 'e' }, { id: 'd', x: 10, y: 30, label: 'd' }, { id: 'COM2', x: 20, y: 30, label: 'commun' }, { id: 'c', x: 30, y: 30, label: 'c' }, { id: 'dp', x: 40, y: 30, label: 'point' }] },
+    multimeter: { w: 100, h: 150, ox: -30, oy: -150, pins: [{ id: 'A', x: 0, y: 0, label: 'A (ampèremètre)' }, { id: 'COM', x: 20, y: 0, label: 'COM' },
+      { id: 'V', x: 40, y: 0, label: 'V (voltmètre)' }] },
     hcsr04: { w: 120, h: 60, ox: -45, oy: -56, pins: [{ id: 'VCC', x: 0, y: 0, label: 'VCC' }, { id: 'TRIG', x: 10, y: 0, label: 'Trig' },
       { id: 'ECHO', x: 20, y: 0, label: 'Echo' }, { id: 'GND', x: 30, y: 0, label: 'GND' }] }
   };

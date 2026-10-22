@@ -119,4 +119,66 @@ const holeAt = (bb, id) => {
   assert.ok(/^1+0+$/.test(out), 'pull-up puis appui : ' + out);
   console.log('OK bouton + INPUT_PULLUP : ' + out);
 }
+// 6) Moteur commandé par un transistor NPN (D9 -> 1 kΩ -> base), multimètre en ampèremètre et voltmètre
+{
+  const c = circuitWith([
+    { id: 'bb', type: 'breadboard', x: 0, y: 300 },
+    { id: 'q', type: 'npn', x: 0, y: 0 }, { id: 'rb', type: 'resistor', x: 0, y: 0, props: { ohms: 1000 } },
+    { id: 'm', type: 'dcmotor', x: 0, y: 0 },
+    { id: 'amp', type: 'multimeter', x: 0, y: 0, sim: { mode: 'A' } },
+    { id: 'volt', type: 'multimeter', x: 0, y: 0, sim: { mode: 'V' } }
+  ], [], []);
+  const bb = c.comps[1];
+  Object.assign(c.comps[2], holeAt(bb, 'd10'));   // E d10, B d11, C d12
+  Object.assign(c.comps[3], holeAt(bb, 'b7'));    // résistance b7 -> b11
+  Object.assign(c.comps[4], holeAt(bb, 'h20'));   // moteur h20 -> h22
+  c.comps[5].x = 500; c.comps[5].y = 600; c.comps[6].x = 700; c.comps[6].y = 600;
+  c.wires.push(
+    { a: { c: 'board', p: 'D9' }, b: { c: 'bb', p: 'a7' } },
+    { a: { c: 'board', p: 'GND_T' }, b: { c: 'bb', p: 'a10' } },
+    { a: { c: 'bb', p: 'a12' }, b: { c: 'bb', p: 'j20' } },          // collecteur -> moteur
+    { a: { c: 'board', p: '5V' }, b: { c: 'amp', p: 'A' } },         // 5 V -> ampèremètre -> moteur
+    { a: { c: 'amp', p: 'COM' }, b: { c: 'bb', p: 'j22' } },
+    { a: { c: 'volt', p: 'V' }, b: { c: 'bb', p: 'i22' } },          // tension aux bornes du moteur
+    { a: { c: 'volt', p: 'COM' }, b: { c: 'bb', p: 'i20' } }
+  );
+  const warns = [];
+  const sim = new Simulator(c, { onWarn: m => warns.push(m) });
+  sim.load(Compiler.compile({ board: 'uno', setup: [sys('pinMode', pin('D9'), n(1)), sys('digitalWrite', pin('D9'), n(1))], loop: [] }).bytes);
+  sim.advance(10);
+  const im = Math.abs(c.comps[4].rt.motor), ia = c.comps[5].rt.amps, vm = c.comps[6].rt.volts;  // le signe donne le sens de rotation
+  assert.ok(im > 0.09 && im < 0.1, 'courant moteur ≈ 94 mA : ' + im);
+  assert.ok(Math.abs(ia - im) < 0.002, 'ampèremètre = courant moteur : ' + ia);
+  assert.ok(vm > 4.6 && vm < 4.85, 'tension moteur ≈ 4,7 V : ' + vm);
+  assert.ok(!warns.some(w => /trop fort/.test(w)), 'pas de surcharge de la broche : ' + warns.join(' | '));
+  console.log(`OK transistor : moteur ${(im * 1000).toFixed(0)} mA, ampèremètre ${(ia * 1000).toFixed(0)} mA, voltmètre ${vm.toFixed(2)} V`);
+}
+
+// 7) Moteur branché directement sur une broche : avertissement de surcharge
+{
+  const c = circuitWith([{ id: 'm', type: 'dcmotor', x: 600, y: 100 }], [
+    { a: { c: 'board', p: 'D9' }, b: { c: 'm', p: '1' } }, { a: { c: 'm', p: '2' }, b: { c: 'board', p: 'GND_T' } }
+  ], []);
+  const warns = [];
+  const sim = new Simulator(c, { onWarn: m => warns.push(m) });
+  sim.load(Compiler.compile({ board: 'uno', setup: [sys('pinMode', pin('D9'), n(1)), sys('digitalWrite', pin('D9'), n(1))], loop: [] }).bytes);
+  sim.advance(10);
+  assert.ok(warns.some(w => /D9.*trop fort|trop fort.*D9/.test(w)), warns.join(' | '));
+  console.log('OK moteur sur une broche : surcharge signalée');
+}
+// 8) Afficheur 7 segments à cathode commune : segment a allumé par D2 via 220 Ω
+{
+  const c = circuitWith([{ id: 'bb', type: 'breadboard', x: 0, y: 300 }, { id: 's7', type: 'sevenseg', x: 0, y: 0 },
+    { id: 'r', type: 'resistor', x: 0, y: 0, props: { ohms: 220 } }], [], []);
+  const bb = c.comps[1];
+  Object.assign(c.comps[2], holeAt(bb, 'e5'));   // g5 f6 COM7 a8 b9 / e5 d6 COM7 c8 dp9
+  Object.assign(c.comps[3], holeAt(bb, 'b4'));   // résistance b4 -> b8 (segment a)
+  c.wires.push({ a: { c: 'board', p: 'D2' }, b: { c: 'bb', p: 'a4' } }, { a: { c: 'bb', p: 'a7' }, b: { c: 'board', p: 'GND_T' } });
+  const sim = new Simulator(c, {});
+  sim.load(Compiler.compile({ board: 'uno', setup: [sys('pinMode', pin('D2'), n(1)), sys('digitalWrite', pin('D2'), n(1))], loop: [] }).bytes);
+  sim.advance(10);
+  const b = c.comps[2].rt.bright;
+  assert.ok(b[0] > 0.5 && b.slice(1).every(x => x === 0), 'segment a seul : ' + b.map(x => x.toFixed(2)));
+  console.log('OK afficheur 7 segments : segment a allumé');
+}
 console.log('Tous les tests du simulateur sont passés.');

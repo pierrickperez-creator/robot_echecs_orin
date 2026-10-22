@@ -123,5 +123,38 @@
         IF0: blk('logic_compare', { OP: 'EQ' }, { A: blk('ard_digital_read', { PIN: 'D2' }), B: { block: { type: 'ard_highlow', fields: { V: '0' } } } }),
         DO0: write('D13', true), ELSE: write('D13', false) } } }, delay(10)))));
 
+  // moteur commandé par un transistor NPN, mesures au multimètre
+  {
+    const bbX = 0, bbY = 260;
+    const rows = { a: 50, b: 60, c: 70, d: 80, e: 90, f: 120, g: 130, h: 140, i: 150, j: 160 };
+    const hole = (row, col) => ({ x: bbX + 20 + (col - 1) * 10, y: bbY + rows[row] });
+    const comps = [
+      { id: 'bb', type: 'breadboard', x: bbX, y: bbY },
+      Object.assign({ id: 'q', type: 'npn' }, hole('d', 10)),
+      Object.assign({ id: 'rb', type: 'resistor', props: { ohms: 1000 } }, hole('b', 7)),
+      Object.assign({ id: 'm', type: 'dcmotor' }, hole('h', 20)),
+      Object.assign({ id: 'd', type: 'diode' }, hole('f', 20)),  // cathode (bague) côté +5 V
+      { id: 'amp', type: 'multimeter', x: 400, y: 470, sim: { mode: 'A' } },
+      { id: 'volt', type: 'multimeter', x: 400, y: 260, sim: { mode: 'V' } }
+    ];
+    const w = (id, a, b, color, pts) => ({ id, a, b, pts: pts || [], color });
+    const wires = [
+      w('w1', { c: 'board', p: 'D9' }, { c: 'bb', p: 'a7' }, '#2e7d32'),
+      w('w2', { c: 'board', p: 'GND_T' }, { c: 'bb', p: 'a10' }, '#212121', [{ x: 110, y: 240 }, { x: 110, y: 240 }]),
+      w('w3', { c: 'bb', p: 'a12' }, { c: 'bb', p: 'j20' }, '#1565c0', [{ x: 130, y: 250 }, { x: 225, y: 250 }, { x: 225, y: 440 }, { x: 210, y: 440 }]),
+      w('w4', { c: 'board', p: '5V' }, { c: 'amp', p: 'A' }, '#d32f2f', [{ x: 150, y: 230 }, { x: 370, y: 230 }, { x: 370, y: 490 }, { x: 400, y: 490 }]),
+      w('w5', { c: 'amp', p: 'COM' }, { c: 'bb', p: 'j24' }, '#d32f2f', [{ x: 420, y: 500 }, { x: 250, y: 500 }]),
+      w('w6', { c: 'bb', p: 'j22' }, { c: 'bb', p: 'i24' }, '#d32f2f'),
+      w('w7', { c: 'volt', p: 'V' }, { c: 'bb', p: 'g22' }, '#d32f2f', [{ x: 440, y: 290 }, { x: 330, y: 290 }, { x: 330, y: 390 }, { x: 230, y: 390 }]),
+      w('w8', { c: 'volt', p: 'COM' }, { c: 'bb', p: 'g20' }, '#212121', [{ x: 420, y: 280 }, { x: 320, y: 280 }, { x: 320, y: 380 }, { x: 210, y: 380 }])
+    ];
+    EX.push(project('Moteur commandé par un transistor', 'Une broche ne peut pas alimenter un moteur : le transistor NPN amplifie le courant. Le multimètre mesure courant et tension (diode de roue libre en parallèle sur le moteur).',
+      'uno', false, comps, wires, [],
+      program(null, seq(
+        blk('ard_analog_write', { PIN: 'D9' }, { VALUE: num(255) }), delay(2, 's'),
+        blk('ard_analog_write', { PIN: 'D9' }, { VALUE: num(120) }), delay(2, 's'),
+        blk('ard_analog_write', { PIN: 'D9' }, { VALUE: num(0) }), delay(2, 's')))));
+  }
+
   root.EXAMPLES = EX;
 })(this);
