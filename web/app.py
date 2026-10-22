@@ -1605,6 +1605,10 @@ def api_reset():
 def api_reset_board_physical():
     """Lance le rangement physique du plateau dans un thread séparé."""
     global status_msg
+    if not homed and not config.SIMULATION_MODE:
+        return jsonify({"status": "error", "msg": "Homing non fait : touchez d'abord DÉMARRER LE ROBOT."}), 400
+    if not pick_ready():
+        return jsonify({"status": "error", "msg": "Prises non calibrées (page Manuel)."}), 400
     if not robot_busy.acquire(blocking=False):
         return jsonify({"status": "busy", "msg": "Le robot est déjà en mouvement."}), 409
     status_msg = "Rangement du plateau — ne touchez pas les pièces !"

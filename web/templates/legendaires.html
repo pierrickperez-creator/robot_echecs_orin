@@ -170,6 +170,7 @@
             style="padding:14px 22px;font-size:16px;background:#2980b9;color:#fff;border:0;border-radius:8px;margin:4px">✋ C'est réglé</button>
     <div style="font-size:12px;color:#aaa;margin-top:10px">Ensuite, touchez ▶ JOUER pour reprendre la lecture.</div>
 </div>
+<script src="/static/dialogs.js"></script>
 <script>
 // ─── Cimetière (même logique que simulation.html) ────────────────────────────
 const WHITE_GY = [];
@@ -274,7 +275,7 @@ function loadGame(id) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({id})
     }).then(r => r.json()).then(d => {
-        if (d.status !== 'ok') { alert('Erreur : ' + d.msg); return; }
+        if (d.status !== 'ok') { uiAlert('Erreur : ' + d.msg); return; }
         selectedId  = id;
         moveHistory = [];
         gameLoaded  = true;

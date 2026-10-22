@@ -569,6 +569,7 @@
 </div>
 
 <script src="/static/sounds.js"></script>
+<script src="/static/dialogs.js"></script>
 <script>
 // ─── Cimetière (cases I4=c9r4 blanc, I5=c9r5 noir) ────────────────────────
 const WHITE_GY = [];
@@ -828,6 +829,7 @@ let wasRobotBusy = false;
 
 // ─── Démarrage : homing piloté depuis l'écran ─────────────────────────────
 let startupShown = '';
+let startupRan = false;      // une procédure de démarrage a eu lieu depuis l'ouverture de la page
 let startupDismissed = '';   // état dans lequel l'utilisateur a fermé la fenêtre (croix)
 function retryDone() {
     fetch('/api/retry_done', {method:'POST'}).then(pollStatus);
@@ -840,7 +842,13 @@ function startupReopen() { startupDismissed = ''; startupShown = ''; pollStatus(
 function updateStartup(d) {
     const st = d.startup_state || 'pret';
     const modal = document.getElementById('startup-modal');
-    if (st === 'pret') { modal.classList.remove('show'); startupShown = ''; startupDismissed = ''; return; }
+    if (st !== 'pret') startupRan = true;
+    if (st === 'pret') {
+        // Démarrage terminé et aucun coup joué : proposer de choisir sa couleur (Blancs / Noirs)
+        if (startupRan && d.move_count === 0) resetGame();
+        startupRan = false;
+        modal.classList.remove('show'); startupShown = ''; startupDismissed = ''; return;
+    }
     if (st === startupDismissed && st !== 'homing') return;   // fermée : on ne la réimpose pas
     if (st === startupShown) return;
     startupShown = st;
@@ -976,17 +984,21 @@ function startGameWithColor(humanPlaysWhite) {
 }
 function exportUsb() {
     fetch('/api/export_usb',{method:'POST'}).then(r=>r.json())
-    .then(d=>alert(d.status==='ok'?'✅ Exporté : '+d.msg:'❌ '+d.msg));
+    .then(d=>uiAlert(d.status==='ok'?'✅ Exporté : '+d.msg:'❌ '+d.msg));
 }
 function emergencyStop() {
     fetch('/emergency_stop',{method:'POST'})
     .then(()=>document.getElementById('status').textContent='⛔ ARRÊT D\'URGENCE');
 }
 function rangerPlateau() {
-    if (!confirm('Le robot va replacer toutes les pièces à leur position de départ.\n\nRetirez vos mains du plateau et appuyez sur OK.')) return;
-    fetch('/api/reset_board_physical', {method:'POST'})
-    .then(()=>{
-        document.getElementById('status').textContent='🧹 Rangement en cours — ne touchez pas les pièces…';
+    uiConfirm('Le robot va replacer toutes les pièces à leur position de départ.\n\nRetirez vos mains du plateau.',
+              '🧹 RANGER', 'Annuler').then(ok => {
+        if (!ok) return;
+        fetch('/api/reset_board_physical', {method:'POST'}).then(r => r.json()).then(d => {
+            if (d.status === 'ok')
+                document.getElementById('status').textContent = '🧹 Rangement en cours — ne touchez pas les pièces…';
+            else uiAlert(d.msg || 'Rangement impossible pour le moment.');
+        }).catch(() => uiAlert('Serveur injoignable.'));
     });
 }
 function quitKiosk() {

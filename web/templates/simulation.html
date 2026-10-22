@@ -132,6 +132,7 @@
     </div>
 </div>
 
+<script src="/static/dialogs.js"></script>
 <script>
 // ─── Cimetière (miroir de config.py — 1 dame par couleur) ─────────────────
 const WHITE_GY = [];
@@ -354,7 +355,7 @@ function simUndo() {
 
 function simExportUsb() {
     fetch('/api/sim/export_usb', {method:'POST'}).then(r => r.json())
-    .then(d => alert(d.status === 'ok' ? '✅ Exporté : ' + d.msg : '❌ ' + d.msg));
+    .then(d => uiAlert(d.status === 'ok' ? '✅ Exporté : ' + d.msg : '❌ ' + d.msg));
 }
 
 let eloTimer = null;
