@@ -1,0 +1,14 @@
+{
+  "name": "simulateur-arduino",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Simulateur Arduino hors ligne (Uno, Nano, Mega, modules Grove) pour la classe",
+  "scripts": {
+    "firmware": "./firmware/build.sh",
+    "build": "python3 tools/build.py",
+    "test": "node tests/run_all.js"
+  },
+  "devDependencies": {
+    "avr8js": "0.21.1"
+  }
+}

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulateur Arduino</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand"><span class="logo">∞</span> Simulateur Arduino</div>
+    <div class="menu">
+      <button class="tb" data-menu="file">Fichier ▾</button>
+      <div class="dropdown" id="menu-file">
+        <button data-act="new">Nouveau projet</button>
+        <button data-act="open">Ouvrir un projet…</button>
+        <button data-act="save">Enregistrer le projet</button>
+        <hr>
+        <button data-act="export-ino">Exporter le code Arduino (.ino)</button>
+        <button data-act="export-hex">Exporter le fichier .hex</button>
+        <hr>
+        <button data-act="teacher">Mode enseignant (exercice)…</button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="tb" data-menu="examples">Exemples ▾</button>
+      <div class="dropdown" id="menu-examples"></div>
+    </div>
+    <div class="sep"></div>
+    <label class="tb-field">Carte
+      <select id="board-select">
+        <option value="uno">Arduino Uno</option>
+        <option value="nano">Arduino Nano</option>
+        <option value="mega">Arduino Mega 2560</option>
+      </select>
+    </label>
+    <label class="tb-field check"><input type="checkbox" id="shield-check"> Shield Grove</label>
+    <div class="sep"></div>
+    <button class="tb primary" id="btn-run" title="Démarrer / arrêter la simulation (F5)">▶ Démarrer la simulation</button>
+    <button class="tb" id="btn-upload" title="Envoyer le programme sur la vraie carte par USB">⬆ Téléverser sur la carte</button>
+    <div class="spacer"></div>
+    <button class="tb" id="btn-consigne" title="Consigne de l'exercice">📋 Consigne</button>
+    <button class="tb" id="btn-sound" title="Son des buzzers">🔊</button>
+    <button class="tb" id="btn-help" title="Aide">?</button>
+  </header>
+
+  <main id="main">
+    <aside id="library">
+      <input id="lib-search" type="search" placeholder="Rechercher un composant…">
+      <div id="lib-list"></div>
+    </aside>
+
+    <section id="circuit-pane">
+      <div id="circuit-wrap">
+        <svg id="circuit" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="circuit-tools">
+          <button data-zoom="in" title="Zoomer">＋</button>
+          <button data-zoom="out" title="Dézoomer">－</button>
+          <button data-zoom="fit" title="Tout afficher">⤢</button>
+          <button id="btn-undo" title="Annuler (Ctrl+Z)">↶</button>
+          <button id="btn-redo" title="Rétablir (Ctrl+Y)">↷</button>
+        </div>
+        <div id="sim-status"></div>
+        <div id="lock-badge" hidden>🔒 Circuit verrouillé par l'enseignant</div>
+        <div id="props" hidden></div>
+        <div id="toast" hidden></div>
+      </div>
+      <div id="bottom">
+        <div class="tabs">
+          <button class="tab active" data-tab="serial">Moniteur série</button>
+          <button class="tab" data-tab="plot">Traceur série</button>
+          <button class="tab" data-tab="msgs">Messages <span id="msg-count" class="badge" hidden>0</span></button>
+          <div class="spacer"></div>
+          <button class="mini" id="bottom-toggle" title="Agrandir / réduire">▴</button>
+        </div>
+        <div class="tabpane active" id="pane-serial">
+          <div class="serial-bar">
+            <label>Source
+              <select id="serial-source">
+                <option value="sim">Simulation</option>
+                <option value="board">Carte USB</option>
+              </select>
+            </label>
+            <label id="serial-baud-wrap" hidden>Vitesse
+              <select id="serial-baud"><option>9600</option><option>115200</option><option>57600</option><option>38400</option><option>19200</option><option>4800</option></select>
+            </label>
+            <button class="mini" id="serial-connect" hidden>Connecter</button>
+            <label class="check"><input type="checkbox" id="serial-autoscroll" checked> défilement auto</label>
+            <label class="check"><input type="checkbox" id="serial-time"> horodatage</label>
+            <button class="mini" id="serial-clear">Effacer</button>
+          </div>
+          <pre id="serial-out"></pre>
+          <div class="serial-in">
+            <input id="serial-input" placeholder="Texte à envoyer à la carte…">
+            <select id="serial-eol"><option value="\n">Nouvelle ligne</option><option value="">Pas de fin de ligne</option><option value="\r\n">NL et CR</option></select>
+            <button class="mini" id="serial-send">Envoyer</button>
+          </div>
+        </div>
+        <div class="tabpane" id="pane-plot"><canvas id="plot"></canvas><div id="plot-legend"></div></div>
+        <div class="tabpane" id="pane-msgs"><ul id="msgs"></ul></div>
+      </div>
+    </section>
+
+    <div id="splitter" title="Glisser pour redimensionner"></div>
+
+    <section id="code-pane">
+      <div class="tabs">
+        <button class="tab active" data-ctab="blocks">Blocs</button>
+        <button class="tab" data-ctab="text">Code Arduino</button>
+        <div class="spacer"></div>
+        <span id="prog-size" class="hint"></span>
+      </div>
+      <div class="ctabpane active" id="cpane-blocks"><div id="blockly"></div></div>
+      <div class="ctabpane" id="cpane-text">
+        <div class="code-bar"><span class="hint">Code généré automatiquement à partir des blocs (lecture seule).</span>
+          <button class="mini" id="copy-code">Copier</button><button class="mini" id="dl-code">Télécharger .ino</button></div>
+        <pre id="code-view"></pre>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- fenêtres -->
+<div id="modal-bg" hidden>
+  <div class="modal" id="modal">
+    <div class="modal-head"><h2 id="modal-title"></h2><button class="mini" id="modal-close">✕</button></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+<input type="file" id="file-input" accept=".json,.arduisim,application/json" hidden>
+
+<script src="vendor/blockly_compressed.js"></script>
+<script src="vendor/blocks_compressed.js"></script>
+<script src="vendor/blockly_msg_fr.js"></script>
+<script src="js/vm_spec.js"></script>
+<script src="js/font5x7.js"></script>
+<script src="js/boards.js"></script>
+<script src="js/catalog.js"></script>
+<script src="js/parts.js"></script>
+<script src="js/vm.js"></script>
+<script src="js/compiler.js"></script>
+<script src="js/hexutil.js"></script>
+<script src="js/firmware_data.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/draw.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/irbuilder.js"></script>
+<script src="js/cppgen.js"></script>
+<script src="js/uploader.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/plotter.js"></script>
+<script src="js/examples.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
