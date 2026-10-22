@@ -6,7 +6,7 @@ const S = require('../src/js/vm_spec.js');
 
 const fw = {};
 for (const [name, cfg] of Object.entries({
-  atmega328p: { progSize: 4608, pageSize: 128, signature: [0x1e, 0x95, 0x0f], flashSize: 32768 - 512 },
+  atmega328p: { progSize: 4096, pageSize: 128, signature: [0x1e, 0x95, 0x0f], flashSize: 32768 - 512 },
   atmega2560: { progSize: 16384, pageSize: 256, signature: [0x1e, 0x98, 0x01], flashSize: 262144 - 8192 }
 })) {
   const dir = path.join(out, name);

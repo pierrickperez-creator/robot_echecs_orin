@@ -16,7 +16,7 @@ build() {
   local name=$1 mcu=$2 variant=$3 progsize=$4
   local dir="$OUT/$name"
   rm -rf "$dir"; mkdir -p "$dir"
-  local CFLAGS="-mmcu=$mcu -DF_CPU=16000000L -DARDUINO=10806 -DARDUINO_ARCH_AVR -Os -ffunction-sections -fdata-sections -w"
+  local CFLAGS="-mmcu=$mcu -DF_CPU=16000000L -DARDUINO=10806 -DARDUINO_ARCH_AVR -Os -ffunction-sections -fdata-sections -w -flto -mcall-prologues"
   local INC="-I$CORE_ROOT/cores/arduino -I$CORE_ROOT/variants/$variant -I$CORE_ROOT/libraries/Wire/src -I$CORE_ROOT/libraries/Wire/src/utility -I$HERE"
   local objs=()
   for f in "$CORE_ROOT"/cores/arduino/*.c "$CORE_ROOT"/libraries/Wire/src/utility/*.c; do
@@ -30,10 +30,15 @@ build() {
     [ -e "$f" ] || continue
     o="$dir/$(basename "$f").o"; avr-gcc $CFLAGS -x assembler-with-cpp $INC -c "$f" -o "$o"; objs+=("$o")
   done
-  avr-gcc $CFLAGS -DPROG_SIZE=$progsize -c "$HERE/prog.c" -o "$dir/prog.o"; objs+=("$dir/prog.o")
-  avr-gcc -mmcu=$mcu -Os -Wl,--gc-sections -o "$dir/vm.elf" "${objs[@]}" -lm
+  avr-gcc ${CFLAGS/-flto/} -DPROG_SIZE=$progsize -c "$HERE/prog.c" -o "$dir/prog.o"; objs+=("$dir/prog.o")
+  avr-gcc -mmcu=$mcu -Os -flto -mcall-prologues -Wl,--gc-sections -o "$dir/vm.elf" "${objs[@]}" -lm
   avr-objcopy -O ihex -R .eeprom "$dir/vm.elf" "$dir/vm.hex"
   avr-size "$dir/vm.elf"
+  # l'image doit laisser la place au bootloader (2 Ko pour l'ancien bootloader des Nano, 8 Ko sur la Mega)
+  local used limit
+  used=$(avr-size "$dir/vm.elf" | awk 'NR==2{print $1+$2}')
+  limit=$([ "$mcu" = atmega2560 ] && echo 253952 || echo 30720)
+  if [ "$used" -gt "$limit" ]; then echo "ERREUR : micrologiciel trop gros pour $mcu ($used > $limit octets)"; exit 1; fi
   local addr
   addr=$(avr-nm "$dir/vm.elf" | awk '$3=="userProg"{print $1}')
   echo "$name : userProg à 0x$addr ($progsize octets)"
@@ -43,7 +48,7 @@ build() {
     | sed -n '/^float sysCall(/,$p' | grep -oE 'case [0-9]+:' | grep -oE '[0-9]+' | sort -n | uniq > "$dir/sys_ids.txt"
 }
 
-build atmega328p atmega328p standard 4608
+build atmega328p atmega328p standard 4096
 build atmega2560 atmega2560 mega 16384
 
 node "$ROOT/tools/gen_firmware_js.js" "$OUT"

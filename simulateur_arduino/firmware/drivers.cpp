@@ -10,11 +10,13 @@
 #include "drivers.h"
 #include "font5x7.h"
 
-#if defined(__AVR_ATmega2560__)
+// FULL_DRIVERS = 0 retire les pilotes I2C les moins courants si la mémoire venait à manquer
+#ifndef FULL_DRIVERS
 #define FULL_DRIVERS 1
+#endif
+#if defined(__AVR_ATmega2560__)
 #define PIXEL_MAX 120
 #else
-#define FULL_DRIVERS 0
 #define PIXEL_MAX 30
 #endif
 
@@ -482,37 +484,49 @@ static void pixelSet(uint8_t pin, uint8_t idx, uint8_t r, uint8_t g, uint8_t b) 
   if (idx + 1 > pixCount) pixCount = idx + 1;
 }
 
-/* ------------------------------------------------------------------ Accéléromètre ADXL345 / LIS3DHTR */
-static uint8_t accelType = 0;  // 1 ADXL345, 2 LIS3DHTR, 0xFF absent
-static uint8_t lisAddr = 0x19;
-static float accelRead(uint8_t axis) {
-  if (accelType == 0) {
-    accelType = 0xFF;
-    if (i2cPresent(0x53) && i2cRead8(0x53, 0x00) == 0xE5) {
-      accelType = 1;
-      i2cWrite8(0x53, 0x31, 0x0B);  // pleine résolution ±16 g
-      i2cWrite8(0x53, 0x2D, 0x08);  // mesure
-    } else {
-      for (uint8_t a = 0x18; a <= 0x19; a++)
-        if (i2cPresent(a) && i2cRead8(a, 0x0F) == 0x33) { lisAddr = a; accelType = 2; }
-      if (accelType == 2) {
-        i2cWrite8(lisAddr, 0x20, 0x57);  // 100 Hz, 3 axes
-        i2cWrite8(lisAddr, 0x23, 0x08);  // haute résolution ±2 g
-      }
+/* ------------------------------------------------------------------ Accéléromètre ADXL345 / LIS3DHTR / LSM6DS3 (+ gyroscope) */
+static uint8_t accelType = 0;  // 1 ADXL345, 2 LIS3DHTR, 3 LSM6DS3, 0xFF absent
+static uint8_t accAddr = 0x19;
+static void accelProbe() {
+  if (accelType) return;
+  accelType = 0xFF;
+  if (i2cPresent(0x53) && i2cRead8(0x53, 0x00) == 0xE5) {
+    accelType = 1;
+    accAddr = 0x53;
+    i2cWrite8(0x53, 0x31, 0x0B);  // pleine résolution ±16 g
+    i2cWrite8(0x53, 0x2D, 0x08);  // mesure
+  } else {
+    for (uint8_t a = 0x18; a <= 0x19; a++)
+      if (i2cPresent(a) && i2cRead8(a, 0x0F) == 0x33) { accAddr = a; accelType = 2; }
+    for (uint8_t a = 0x6A; a <= 0x6B; a++) {
+      uint8_t id = i2cPresent(a) ? i2cRead8(a, 0x0F) : 0;
+      if (id == 0x69 || id == 0x6A) { accAddr = a; accelType = 3; }
     }
-    delay(10);
+    if (accelType == 2) {
+      i2cWrite8(accAddr, 0x20, 0x57);  // 100 Hz, 3 axes
+      i2cWrite8(accAddr, 0x23, 0x08);  // haute résolution ±2 g
+    } else if (accelType == 3) {
+      i2cWrite8(accAddr, 0x10, 0x40);  // accéléromètre 104 Hz ±2 g
+      i2cWrite8(accAddr, 0x11, 0x4C);  // gyroscope 104 Hz 2000 °/s
+    }
   }
-  uint8_t d[6];
-  if (accelType == 1) {
-    if (i2cReadBytes(0x53, 0x32, d, 6) != 6) return 0;
-    int16_t v = (int16_t)(d[axis * 2] | (d[axis * 2 + 1] << 8));
-    return v * 0.0039f;
-  }
-  if (accelType == 2) {
-    if (i2cReadBytes(lisAddr, 0x28 | 0x80, d, 6) != 6) return 0;
-    int16_t v = (int16_t)(d[axis * 2] | (d[axis * 2 + 1] << 8));
-    return (v >> 4) * 0.001f;
-  }
+  delay(10);
+}
+static int16_t accRaw(uint8_t reg, uint8_t axis) {
+  uint8_t d[2];
+  if (i2cReadBytes(accAddr, reg + axis * 2, d, 2) != 2) return 0;
+  return (int16_t)(d[0] | (d[1] << 8));
+}
+static float accelRead(uint8_t axis) {
+  accelProbe();
+  if (accelType == 1) return accRaw(0x32, axis) * 0.0039f;
+  if (accelType == 2) return (accRaw(0x28 | 0x80, axis) >> 4) * 0.001f;
+  if (accelType == 3) return accRaw(0x28, axis) * 0.000061f;
+  return 0;
+}
+static float gyroRead(uint8_t axis) {
+  accelProbe();
+  if (accelType == 3) return accRaw(0x22, axis) * 0.07f;
   return 0;
 }
 
@@ -729,6 +743,129 @@ static void motorI2C(uint8_t m, int16_t speed) {
 
 #endif
 
+/* ------------------------------------------------------------------ Capteur de CO2 SCD30 (0x61) */
+static bool scdOn = false;
+static float scdVal[3] = {0, 0, 0};
+static uint8_t scdCrc(uint8_t a, uint8_t b) {
+  uint8_t crc = 0xFF;
+  uint8_t d[2] = {a, b};
+  for (uint8_t i = 0; i < 2; i++) {
+    crc ^= d[i];
+    for (uint8_t k = 0; k < 8; k++) crc = (crc & 0x80) ? (crc << 1) ^ 0x31 : crc << 1;
+  }
+  return crc;
+}
+static void scdCmd(uint16_t cmd, int32_t arg) {
+  wireBegin();
+  Wire.beginTransmission(0x61);
+  Wire.write(cmd >> 8); Wire.write(cmd & 0xFF);
+  if (arg >= 0) { Wire.write(arg >> 8); Wire.write(arg & 0xFF); Wire.write(scdCrc(arg >> 8, arg & 0xFF)); }
+  Wire.endTransmission();
+}
+static float co2Read(uint8_t what) {
+  if (!scdOn) { scdOn = true; scdCmd(0x0010, 0); delay(10); }
+  scdCmd(0x0202, -1);
+  delay(3);
+  if (Wire.requestFrom((uint8_t)0x61, (uint8_t)3) == 3 && (Wire.read() << 8 | Wire.read()) == 1) {
+    Wire.read();
+    scdCmd(0x0300, -1);
+    delay(3);
+    if (Wire.requestFrom((uint8_t)0x61, (uint8_t)18) == 18) {
+      for (uint8_t i = 0; i < 3; i++) {
+        uint8_t b[6];
+        for (uint8_t k = 0; k < 6; k++) b[k] = Wire.read();
+        union { uint32_t u; float f; } cv;
+        cv.u = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[3] << 8) | b[4];
+        scdVal[i] = cv.f;
+      }
+    }
+  } else {
+    while (Wire.available()) Wire.read();
+  }
+  return scdVal[what > 2 ? 2 : what];
+}
+
+/* ------------------------------------------------------------------ Tâches de fond : encodeur rotatif et récepteur infrarouge */
+// Ces modules envoient des signaux à tout moment : on les surveille entre deux instructions
+// du programme et pendant les attentes.
+bool bgActive = false;
+static uint8_t encPin = 255, encPrev = 0;
+static int16_t encCount = 0;
+static const int8_t ENC_TABLE[16] PROGMEM = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
+static uint8_t irPin = 255, irLevel = 1, irState = 0, irBits = 0;
+static uint32_t irData = 0;
+static unsigned long irEdge = 0;
+static int16_t irCode = 0;
+
+static void irEdgeSeen(uint8_t newLevel, unsigned long dur) {
+  // newLevel : niveau après le front ; dur : durée du niveau précédent (µs)
+  if (newLevel == 1) {            // fin d'une impulsion basse (porteuse détectée)
+    if (dur > 8000 && dur < 10000) { irState = 1; return; }
+    if (irState == 3 && (dur < 300 || dur > 800)) irState = 0;
+  } else {                        // fin d'un niveau haut
+    if (irState == 1) {
+      if (dur > 4000 && dur < 5000) { irState = 3; irBits = 0; irData = 0; }
+      else irState = 0;             // code de répétition : ignoré
+      return;
+    }
+    if (irState == 3) {
+      if (dur > 300 && dur < 800) irBits++;
+      else if (dur > 1300 && dur < 1900) { irData |= (uint32_t)1 << irBits; irBits++; }
+      else { irState = 0; return; }
+      if (irBits == 32) { irCode = (irData >> 16) & 0xFF; irState = 0; }
+    }
+  }
+}
+
+void bgPoll() {
+  if (encPin != 255) {
+    uint8_t st = (digitalRead(encPin) << 1) | digitalRead(encPin + 1);
+    if (st != encPrev) {
+      encCount += (int8_t)pgm_read_byte(ENC_TABLE + ((encPrev << 2) | st));
+      encPrev = st;
+    }
+  }
+  if (irPin != 255) {
+    uint8_t lv = digitalRead(irPin);
+    if (lv != irLevel) {
+      unsigned long now = micros();
+      irEdgeSeen(lv, now - irEdge);
+      irEdge = now;
+      irLevel = lv;
+    }
+  }
+}
+static void vmDelay(unsigned long ms) {
+  if (!bgActive) { delay(ms); return; }
+  unsigned long t0 = millis();
+  while (millis() - t0 < ms) bgPoll();
+}
+static float encoderRead(uint8_t pin) {
+  if (encPin != pin) {
+    encPin = pin;
+    pinMode(pin, INPUT_PULLUP);
+    pinMode(pin + 1, INPUT_PULLUP);
+    encPrev = (digitalRead(pin) << 1) | digitalRead(pin + 1);
+    encCount = 0;
+    bgActive = true;
+  }
+  bgPoll();
+  return encCount / 4;
+}
+static float irRead(uint8_t pin) {
+  if (irPin != pin) {
+    irPin = pin;
+    pinMode(pin, INPUT_PULLUP);
+    irLevel = digitalRead(pin);
+    irEdge = micros();
+    bgActive = true;
+  }
+  bgPoll();
+  int16_t c = irCode;
+  irCode = 0;
+  return c;
+}
+
 /* ------------------------------------------------------------------ Aiguillage des appels système */
 static uint8_t toByte(float v) {
   if (v < 0) return 0;
@@ -746,7 +883,7 @@ float sysCall(uint8_t id, float *a) {
     case SYS_DIGITALREAD: return digitalRead(pin);
     case SYS_ANALOGREAD: return analogRead(pin);
     case SYS_ANALOGWRITE: analogWrite(pin, toByte(a[1])); return 0;
-    case SYS_DELAY: if (a[0] > 0) delay((unsigned long)a[0]); return 0;
+    case SYS_DELAY: if (a[0] > 0) vmDelay((unsigned long)a[0]); return 0;
     case SYS_DELAYMICROSECONDS: if (a[0] > 0) delayMicroseconds((unsigned int)a[0]); return 0;
     case SYS_MILLIS: return millis();
     case SYS_MICROS: return micros();
@@ -792,6 +929,10 @@ float sysCall(uint8_t id, float *a) {
       return 0;
     }
     case SYS_ACCELREAD: return accelRead(pin > 2 ? 2 : pin);
+    case SYS_GYROREAD: return gyroRead(pin > 2 ? 2 : pin);
+    case SYS_CO2READ: return co2Read(pin);
+    case SYS_ENCODERREAD: return encoderRead(pin);
+    case SYS_IRREAD: return irRead(pin);
     case SYS_BAROREAD: return baroRead(pin);
     case SYS_THI2CREAD: return thI2CRead(pin, (uint8_t)a[1]);
     case SYS_RTCREAD: return rtcRead(pin);

@@ -69,10 +69,13 @@ et ne peut modifier que le programme.
 ## Composants
 
 La liste complète, avec ce qui fonctionne en simulation et sur la carte réelle, est dans [docs/MODULES.md](docs/MODULES.md).
-Tous les modules fonctionnent dans le simulateur. Sur la carte réelle, la mémoire de l'Uno/Nano (32 Ko) ne permet pas
-d'embarquer tous les pilotes : certains modules I2C ne sont pilotés que sur la Mega, et quelques modules (gestes, CO2,
-laser VL53L0X, encodeur, infrarouge, RFID, clavier, MP3) sont pour l'instant **en simulation seulement**.
-Le simulateur prévient avant le téléversement si le programme utilise un module non pris en charge par la carte.
+Tous les modules fonctionnent dans le simulateur, et presque tous sur la carte réelle (Uno, Nano et Mega).
+Cinq modules sont pour l'instant **en simulation seulement** : capteur de gestes PAJ7620, distance laser VL53L0X,
+et les modules série (RFID 125 kHz, clavier 12 touches, lecteur MP3). Le simulateur prévient avant le téléversement
+si le programme utilise un module non pris en charge par la carte.
+
+Les pilotes de la carte réelle ont été vérifiés en émulation (micrologiciel exécuté dans un émulateur AVR avec des
+modules I2C et des signaux simulés) ; ils restent à valider sur votre matériel.
 
 ## Limites connues
 

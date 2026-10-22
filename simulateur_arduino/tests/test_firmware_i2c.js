@@ -65,3 +65,39 @@ function regDevice(regs) {
   assert.ok(hw.serial.startsWith('25.00 50.00'), 'DHT20 : ' + JSON.stringify(hw.serial));
   console.log('OK capteur DHT20 : ' + hw.serial.trim());
 }
+
+// --- centrale inertielle LSM6DS3 (0x6A) : accélération z = 1 g, gyroscope x = 70 °/s
+{
+  const regs = { 0x0F: 0x69 };
+  const put = (r, v) => { regs[r] = v & 0xFF; regs[r + 1] = (v >> 8) & 0xFF; };
+  put(0x2C, 16393);    // z ≈ 1,000 g (0,061 mg/bit)
+  put(0x22, 1000);     // gx = 70 °/s (70 m°/s/bit)
+  const prog = { board: 'uno', setup: [], procs: [], loop: [
+    { k: 'print', target: 0, parts: [sys('accelRead', n(2)), str(' '), sys('gyroRead', n(0))], nl: true },
+    sys('delay', n(10000))
+  ] };
+  const hw = runFirmware(Compiler.compile(prog).bytes, { seconds: 0.5, i2c: { 0x6A: regDevice(regs) } });
+  assert.ok(hw.serial.startsWith('1.00 70.00'), 'LSM6DS3 : ' + JSON.stringify(hw.serial));
+  console.log('OK centrale inertielle LSM6DS3 : ' + hw.serial.trim());
+}
+
+// --- capteur de CO2 SCD30 (0x61) : 812 ppm, 23,5 °C, 41 %
+{
+  const crc = (a, b) => { let c = 0xFF; for (const d of [a, b]) { c ^= d; for (let k = 0; k < 8; k++) c = (c & 0x80) ? ((c << 1) ^ 0x31) & 0xFF : (c << 1) & 0xFF; } return c; };
+  const f2b = f => { const b = Buffer.alloc(4); b.writeFloatBE(f); return [...b]; };
+  const words = [812, 23.5, 41].flatMap(f => { const b = f2b(f); return [b[0], b[1], crc(b[0], b[1]), b[2], b[3], crc(b[2], b[3])]; });
+  let cmd = [], out = [], started = false;
+  const scd = {
+    start(write) { if (write) cmd = []; },
+    write(v) { cmd.push(v); if (cmd.length === 2) { const c = (cmd[0] << 8) | cmd[1]; if (c === 0x0202) out = [0, 1, crc(0, 1)]; if (c === 0x0300) out = words.slice(); } if (cmd.length === 5 && cmd[0] === 0 && cmd[1] === 0x10) started = cmd[4] === 0x81; },
+    read() { return out.length ? out.shift() : 0; }
+  };
+  const prog = { board: 'uno', setup: [], procs: [], loop: [
+    { k: 'print', target: 0, parts: [sys('co2Read', n(0)), str(' '), sys('co2Read', n(1)), str(' '), sys('co2Read', n(2))], nl: true },
+    sys('delay', n(10000))
+  ] };
+  const hw = runFirmware(Compiler.compile(prog).bytes, { seconds: 0.5, i2c: { 0x61: scd } });
+  assert.ok(started, 'commande de démarrage SCD30 avec CRC 0x81');
+  assert.ok(hw.serial.startsWith('812.00 23.50 41.00'), 'SCD30 : ' + JSON.stringify(hw.serial));
+  console.log('OK capteur de CO2 SCD30 : ' + hw.serial.trim());
+}

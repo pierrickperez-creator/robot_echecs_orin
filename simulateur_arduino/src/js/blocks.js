@@ -342,14 +342,14 @@
     init() {
       this.appendDummyInput().appendField('vitesse de rotation').appendField(new Blockly.FieldDropdown([['X', '0'], ['Y', '1'], ['Z', '2']]), 'AXIS')
         .appendField('(°/s) du gyroscope (I2C)');
-      output(this, COL.sensor, 'Number', 'Simulation uniquement pour l\'instant.');
+      output(this, COL.sensor, 'Number', 'Centrale inertielle LSM6DS3.');
     }
   };
   const simpleSensor = (name, label, tip) => {
     B[name] = { init() { this.appendDummyInput().appendField(label); output(this, COL.sensor, 'Number', tip); } };
   };
-  simpleSensor('grove_lux', 'éclairement (lux) du capteur TSL2561 (I2C)', 'Capteur de lumière numérique. Carte Mega seulement (mémoire).');
-  simpleSensor('grove_heart', 'pouls (battements/min) du capteur à pince (I2C)', 'Carte Mega seulement (mémoire).');
+  simpleSensor('grove_lux', 'éclairement (lux) du capteur TSL2561 (I2C)', 'Capteur de lumière numérique (première mesure après 0,4 s).');
+  simpleSensor('grove_heart', 'pouls (battements/min) du capteur à pince (I2C)', 'Capteur cardiaque à pince Grove.');
   simpleSensor('grove_tof', 'distance (mm) du capteur laser VL53L0X (I2C)', 'Simulation uniquement pour l\'instant.');
   simpleSensor('grove_rfid', 'identifiant du badge RFID lu (0 si aucun)', 'Simulation uniquement pour l\'instant.');
   simpleSensor('grove_keypad', 'touche appuyée sur le clavier (-1 si aucune)', 'Simulation uniquement pour l\'instant.');
@@ -357,21 +357,21 @@
     init() {
       this.appendDummyInput().appendField('quantité de').appendField(new Blockly.FieldDropdown([['rouge', '0'], ['vert', '1'], ['bleu', '2'], ['lumière totale', '3']]), 'CH')
         .appendField('du capteur de couleur (I2C)');
-      output(this, COL.sensor, 'Number', 'Rouge, vert, bleu : 0 à 255. Carte Mega seulement (mémoire).');
+      output(this, COL.sensor, 'Number', 'Rouge, vert, bleu : 0 à 255 (proportion de chaque couleur).');
     }
   };
   B.grove_irtemp = {
     init() {
       this.appendDummyInput().appendField('température').appendField(new Blockly.FieldDropdown([['de l\'objet visé', '0'], ['ambiante', '1']]), 'W')
         .appendField('(°C) du thermomètre infrarouge');
-      output(this, COL.sensor, 'Number', 'MLX90615. Carte Mega seulement (mémoire).');
+      output(this, COL.sensor, 'Number', 'Thermomètre sans contact MLX90615.');
     }
   };
   B.grove_co2 = {
     init() {
       this.appendDummyInput().appendField(new Blockly.FieldDropdown([['CO2 (ppm)', '0'], ['température (°C)', '1'], ['humidité (%)', '2']]), 'W')
         .appendField('du capteur SCD30');
-      output(this, COL.sensor, 'Number', 'Simulation uniquement pour l\'instant.');
+      output(this, COL.sensor, 'Number', 'Une nouvelle mesure toutes les 2 secondes environ.');
     }
   };
   B.grove_gesture = {
@@ -401,13 +401,13 @@
   B.grove_encoder = {
     init() {
       this.appendDummyInput().appendField('position de l\'encodeur rotatif sur').appendField(new Blockly.FieldDropdown(groveDigital), 'PORT');
-      output(this, COL.sensor, 'Number', 'Simulation uniquement pour l\'instant.');
+      output(this, COL.sensor, 'Number', 'Nombre de crans depuis le démarrage (négatif dans le sens anti-horaire).');
     }
   };
   B.grove_ir = {
     init() {
       this.appendDummyInput().appendField('code reçu par le récepteur infrarouge sur').appendField(new Blockly.FieldDropdown(groveDigital), 'PORT');
-      output(this, COL.sensor, 'Number', '0 si aucune touche de télécommande. Simulation uniquement pour l\'instant.');
+      output(this, COL.sensor, 'Number', 'Code de la touche (protocole NEC), 0 si aucune touche. Chaque appui n\'est lu qu\'une fois.');
     }
   };
 
@@ -471,7 +471,7 @@
       num(this, 'SPEED', 'vitesse');
       this.appendDummyInput().appendField('(-255 à 255)');
       this.setInputsInline(true);
-      statement(this, COL.out, 'Carte Mega seulement (mémoire).');
+      statement(this, COL.out, 'Grove I2C Motor Driver : vitesse positive = sens horaire.');
     }
   };
   B.grove_chain = {

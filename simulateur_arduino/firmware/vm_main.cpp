@@ -114,6 +114,7 @@ static void exec(uint16_t start) {
   pc = start;
   csp = 0;
   for (;;) {
+    if (bgActive) bgPoll();
     if (pc >= progLen) vmError(4);
     uint8_t op = pb(pc++);
     float a, b;

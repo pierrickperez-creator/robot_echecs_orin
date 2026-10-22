@@ -161,7 +161,7 @@
   add({ type: 'grove_lis3dhtr', name: 'Accéléromètre 3 axes LIS3DHTR (I2C)', group: G_SENS, kind: 'accel', conn: 'i2c', draw: 'grove', icon: 'accel',
     blocks: ['accel'], sim: { x: 0, y: 0, z: 1 }, ref: '101020583' });
   add({ type: 'grove_imu6', name: 'Centrale inertielle 6 axes LSM6DS3 (I2C)', group: G_SENS, kind: 'accel', conn: 'i2c', draw: 'grove', icon: 'accel',
-    blocks: ['accel', 'gyro'], sim: { x: 0, y: 0, z: 1, gx: 0, gy: 0, gz: 0 }, ref: '105020012', simOnly: ['gyroRead'] });
+    blocks: ['accel', 'gyro'], sim: { x: 0, y: 0, z: 1, gx: 0, gy: 0, gz: 0 }, ref: '105020012' });
   add({ type: 'grove_tsl2561', name: 'Capteur de lumière numérique TSL2561 (I2C)', group: G_SENS, kind: 'i2cval', conn: 'i2c', draw: 'grove', icon: 'light',
     blocks: ['lux'], sim: { value: 300, min: 0, max: 40000, unit: 'lux', label: 'Éclairement', sys: 'lightI2CRead' }, ref: '101020030' });
   add({ type: 'grove_tcs34725', name: 'Capteur de couleur TCS34725 (I2C)', group: G_SENS, kind: 'color', conn: 'i2c', draw: 'grove', icon: 'color',

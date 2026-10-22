@@ -103,17 +103,17 @@ Total : **130 composants**, dont **112 modules Grove**.
 | Capteur BME280 temp./humidité/pression (I2C) | I2C | oui | oui | 101020193 |
 | Accéléromètre 3 axes ADXL345 (I2C) | I2C | oui | oui | 101020054 |
 | Accéléromètre 3 axes LIS3DHTR (I2C) | I2C | oui | oui | 101020583 |
-| Centrale inertielle 6 axes LSM6DS3 (I2C) | I2C | oui | pas encore | 105020012 |
-| Capteur de lumière numérique TSL2561 (I2C) | I2C | oui | Mega seulement | 101020030 |
-| Capteur de couleur TCS34725 (I2C) | I2C | oui | Mega seulement | 101020341 |
-| Thermomètre infrarouge MLX90615 (I2C) | I2C | oui | Mega seulement | 101020196 |
-| Capteur cardiaque à pince (I2C) | I2C | oui | Mega seulement | 103020024 |
+| Centrale inertielle 6 axes LSM6DS3 (I2C) | I2C | oui | oui | 105020012 |
+| Capteur de lumière numérique TSL2561 (I2C) | I2C | oui | oui | 101020030 |
+| Capteur de couleur TCS34725 (I2C) | I2C | oui | oui | 101020341 |
+| Thermomètre infrarouge MLX90615 (I2C) | I2C | oui | oui | 101020196 |
+| Capteur cardiaque à pince (I2C) | I2C | oui | oui | 103020024 |
 | Capteur de distance laser VL53L0X (I2C) | I2C | oui | pas encore | 101020532 |
-| Capteur de CO2 SCD30 (I2C) | I2C | oui | pas encore | 101020634 |
+| Capteur de CO2 SCD30 (I2C) | I2C | oui | oui | 101020634 |
 | Capteur de gestes PAJ7620 (I2C) | I2C | oui | pas encore | 101020083 |
 | Horloge temps réel DS1307 (I2C) | I2C | oui | oui | 101020013 |
-| Encodeur rotatif | numérique (D) | oui | pas encore | 111020001 |
-| Récepteur infrarouge (télécommande) | numérique (D) | oui | pas encore | 101020016 |
+| Encodeur rotatif | numérique (D) | oui | oui | 111020001 |
+| Récepteur infrarouge (télécommande) | numérique (D) | oui | oui | 101020016 |
 | Lecteur RFID 125 kHz | série (UART) | oui | pas encore | 113020002 |
 | Clavier 12 touches | série (UART) | oui | pas encore | 101020779 |
 
@@ -141,7 +141,7 @@ Total : **130 composants**, dont **112 modules Grove**.
 | MOSFET (commande de puissance) | numérique (D) | oui | oui | 103020008 |
 | Mini ventilateur | numérique (D) | oui | oui | 114990150 |
 | Servomoteur Grove | numérique (D) | oui | oui | 316010005 |
-| Pilote de moteurs I2C | I2C | oui | Mega seulement | 105020093 |
+| Pilote de moteurs I2C | I2C | oui | oui | 105020093 |
 | LED RGB chaînable (P9813) | numérique (D) | oui | oui | 104020048 |
 | Barrette 10 LED RGB (WS2813) | numérique (D) | oui | oui | 104020170 |
 | Anneau 16 LED RGB (WS2813) | numérique (D) | oui | oui | 104020169 |
