@@ -14,6 +14,8 @@ Un simulateur de circuits Arduino inspiré de Tinkercad Circuits, pensé pour la
 - **téléversement sur la vraie carte par USB**, directement depuis la page (Chrome/Edge), sans IDE ;
 - **exercices** : l'enseignant écrit une consigne et peut verrouiller le circuit.
 
+![Écran d'accueil](docs/captures/accueil.png)
+
 ![Bouton et LED Grove](docs/captures/bouton_led.png)
 
 ## Pour les élèves et l'enseignant
@@ -28,7 +30,8 @@ Le travail est sauvegardé automatiquement dans le navigateur. **Fichier > Enreg
 ### Construire un circuit
 
 - Choisissez la carte en haut et cochez **Shield Grove** pour les modules Grove.
-- Glissez un composant de la liste de gauche vers le circuit (ou cliquez dessus puis dans le circuit).
+- Glissez un composant depuis la colonne **Composants** (à droite) vers le circuit, ou cliquez dessus puis dans le circuit.
+  Le bouton **Code** affiche la programmation par blocs à la place des composants, comme dans Tinkercad.
 - Les modules Grove se branchent tout seuls sur un port libre adapté (D, A ou I2C). Pour changer : panneau de droite,
   ou tirer le câble depuis le connecteur blanc du module jusqu'à un port.
 - Fils : cliquer sur une broche puis sur une autre (clic dans le vide = coude, Échap = annuler). Les pattes posées sur la

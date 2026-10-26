@@ -9,64 +9,72 @@
 <body>
 <div id="app">
   <header id="topbar">
-    <div class="brand"><span class="logo">∞</span> Simulateur Arduino</div>
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><rect x="2" y="2" width="36" height="36" rx="10" fill="#1d6fd8"/>
+        <path d="M11 20c0-3 2-5 4.5-5s3.7 2 4.5 5c.8 3 2 5 4.5 5s4.5-2 4.5-5-2-5-4.5-5-3.7 2-4.5 5c-.8 3-2 5-4.5 5S11 23 11 20z" fill="none" stroke="#fff" stroke-width="2.6"/>
+        <circle cx="31" cy="9" r="4" fill="#ffb020"/></svg>
+      <div class="brand-text">
+        <input id="project-title" value="Mon projet" title="Nom du projet (cliquer pour le modifier)" spellcheck="false">
+        <span class="brand-sub">Simulateur Arduino</span>
+      </div>
+    </div>
     <div class="menu">
-      <button class="tb" data-menu="file">Fichier ▾</button>
+      <button class="tb ghost" data-menu="file">Fichier <i class="caret"></i></button>
       <div class="dropdown" id="menu-file">
-        <button data-act="new">Nouveau projet</button>
-        <button data-act="open">Ouvrir un projet…</button>
-        <button data-act="save">Enregistrer le projet</button>
+        <button data-act="new">✚ Nouveau projet</button>
+        <button data-act="open">📂 Ouvrir un projet…</button>
+        <button data-act="save">💾 Enregistrer le projet</button>
         <hr>
         <button data-act="export-ino">Exporter le code Arduino (.ino)</button>
         <button data-act="export-hex">Exporter le fichier .hex</button>
         <hr>
-        <button data-act="teacher">Mode enseignant (exercice)…</button>
+        <button data-act="teacher">🎓 Mode enseignant (exercice)…</button>
       </div>
     </div>
     <div class="menu">
-      <button class="tb" data-menu="examples">Exemples ▾</button>
-      <div class="dropdown" id="menu-examples"></div>
+      <button class="tb ghost" data-menu="examples">Exemples <i class="caret"></i></button>
+      <div class="dropdown wide" id="menu-examples"></div>
     </div>
-    <div class="sep"></div>
-    <label class="tb-field">Carte
+    <div class="tool-group" role="toolbar" aria-label="Outils du circuit">
+      <button class="icon-btn" id="btn-undo" title="Annuler (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 7H5V3M5.5 7.5A8 8 0 1 1 4 13"/></svg></button>
+      <button class="icon-btn" id="btn-redo" title="Rétablir (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M15 7h4V3M18.5 7.5A8 8 0 1 0 20 13"/></svg></button>
+      <span class="tg-sep"></span>
+      <button class="icon-btn" id="btn-rotate" title="Tourner la pièce sélectionnée (R)"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
+      <button class="icon-btn" id="btn-delete" title="Supprimer la sélection (Suppr)"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>
+    </div>
+    <div class="spacer"></div>
+    <label class="pill" title="Carte Arduino">
+      <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 6V4M11 6V4M15 6V4M7 18v2M11 18v2M15 18v2"/></svg>
       <select id="board-select">
         <option value="uno">Arduino Uno</option>
         <option value="nano">Arduino Nano</option>
-        <option value="mega">Arduino Mega 2560</option>
+        <option value="mega">Arduino Mega</option>
       </select>
     </label>
-    <label class="tb-field check"><input type="checkbox" id="shield-check"> Shield Grove</label>
-    <div class="sep"></div>
-    <button class="tb primary" id="btn-run" title="Démarrer / arrêter la simulation (F5)">▶ Démarrer la simulation</button>
-    <button class="tb" id="btn-upload" title="Envoyer le programme sur la vraie carte par USB">⬆ Téléverser sur la carte</button>
-    <div class="spacer"></div>
-    <button class="tb" id="btn-consigne" title="Consigne de l'exercice">📋 Consigne</button>
-    <button class="tb" id="btn-sound" title="Son des buzzers">🔊</button>
-    <button class="tb" id="btn-help" title="Aide">?</button>
+    <label class="switch" title="Ajouter le shield Grove sur la carte"><input type="checkbox" id="shield-check"><span class="slider"></span><span><span class="lbl-long">Shield </span>Grove</span></label>
+    <button class="tb code-btn" id="btn-code" title="Afficher la programmation par blocs"><svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg> Code</button>
+    <button class="tb run" id="btn-run" title="Démarrer / arrêter la simulation (F5)">▶ Démarrer la simulation</button>
+    <button class="tb" id="btn-upload" title="Envoyer le programme sur la vraie carte par USB"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg><span class="lbl">Téléverser</span></button>
+    <button class="icon-btn" id="btn-consigne" title="Consigne de l'exercice"><svg viewBox="0 0 24 24"><path d="M9 4h6v3H9zM7 5H5v16h14V5h-2M8 12h8M8 16h5"/></svg></button>
+    <button class="icon-btn" id="btn-sound" title="Son des buzzers : activé"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+    <button class="icon-btn" id="btn-help" title="Aide"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></button>
   </header>
 
   <main id="main">
-    <aside id="library">
-      <input id="lib-search" type="search" placeholder="Rechercher un composant…">
-      <div id="lib-list"></div>
-    </aside>
-
     <section id="circuit-pane">
       <div id="circuit-wrap">
         <svg id="circuit" xmlns="http://www.w3.org/2000/svg"></svg>
         <div id="circuit-tools">
           <button data-zoom="in" title="Zoomer">＋</button>
           <button data-zoom="out" title="Dézoomer">－</button>
-          <button data-zoom="fit" title="Tout afficher">⤢</button>
-          <button id="btn-undo" title="Annuler (Ctrl+Z)">↶</button>
-          <button id="btn-redo" title="Rétablir (Ctrl+Y)">↷</button>
+          <button data-zoom="fit" title="Tout afficher"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
         </div>
         <div id="sim-status"></div>
         <div id="lock-badge" hidden>🔒 Circuit verrouillé par l'enseignant</div>
         <div id="props" hidden></div>
         <div id="toast" hidden></div>
       </div>
-      <div id="bottom">
+      <div id="bottom" class="collapsed">
         <div class="tabs">
           <button class="tab active" data-tab="serial">Moniteur série</button>
           <button class="tab" data-tab="plot">Traceur série</button>
@@ -106,10 +114,11 @@
 
     <section id="code-pane">
       <div class="tabs">
-        <button class="tab active" data-ctab="blocks">Blocs</button>
+        <button class="tab active" data-ctab="blocks">🧩 Blocs</button>
         <button class="tab" data-ctab="text">Code Arduino</button>
         <div class="spacer"></div>
         <span id="prog-size" class="hint"></span>
+        <button class="mini" id="code-close" title="Revenir aux composants">Composants ›</button>
       </div>
       <div class="ctabpane active" id="cpane-blocks"><div id="blockly"></div></div>
       <div class="ctabpane" id="cpane-text">
@@ -118,6 +127,17 @@
         <pre id="code-view"></pre>
       </div>
     </section>
+
+    <aside id="library">
+      <div class="lib-head">
+        <h2>Composants</h2>
+        <select id="lib-cat" title="Famille de composants"></select>
+        <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+          <input id="lib-search" type="search" placeholder="Rechercher…"></div>
+      </div>
+      <div id="lib-list"></div>
+      <p class="lib-tip">Glissez un composant sur le plan de travail, ou cliquez dessus puis dans le circuit.</p>
+    </aside>
   </main>
 </div>
 

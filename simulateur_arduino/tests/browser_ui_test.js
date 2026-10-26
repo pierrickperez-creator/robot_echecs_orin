@@ -18,6 +18,7 @@ fs.mkdirSync(shots, { recursive: true });
   page.on('dialog', d => d.accept());
   await page.goto(file);
   await page.waitForFunction(() => window.APP && window.APP.state && window.APP.state.project);
+  await page.keyboard.press('Escape');   // ferme l'écran d'accueil
   const results = [];
   const check = (name, ok, detail) => { results.push(ok); console.log((ok ? 'OK   ' : 'ÉCHEC ') + name + (detail ? ' — ' + detail : '')); };
 
@@ -34,7 +35,7 @@ fs.mkdirSync(shots, { recursive: true });
 
   // 1) poser une plaque d'essai et une LED par clic dans la bibliothèque puis dans le circuit
   await page.click('.lib-item[data-type="breadboard"]');
-  let p = await screen(0, 260);
+  let p = await screen(320, 0);
   await page.mouse.click(p.x, p.y);
   await page.waitForTimeout(200);
   let n = await page.evaluate(() => APP.state.project.circuit.comps.length);

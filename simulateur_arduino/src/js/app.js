@@ -205,6 +205,7 @@
     updateCodeView();
     clearMsgs();
     document.title = state.project.title + ' — Simulateur Arduino';
+    $('#project-title').value = state.project.title;
     if (!opts.silent && state.project.exercise && state.project.exercise.text) showConsigne();
     $('#btn-consigne').style.display = state.project.exercise ? '' : 'none';
     autosave();
@@ -276,20 +277,24 @@
   }
 
   /* ================================================================ bibliothèque */
+  const GROUP_LABEL = g => (g === 'Composants de base' ? 'Basiques' : g.replace('Grove – ', 'Grove : '));
   function renderLibrary(filter) {
     const list = $('#lib-list');
-    const f = (filter || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const f = (filter || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const cat = $('#lib-cat').value;
     const fw328 = FIRMWARE.images.atmega328p.sys, fw2560 = FIRMWARE.images.atmega2560.sys;
     let html = '';
     for (const group of CATALOG.groups) {
-      const items = CATALOG.list.filter(c => c.group === group && (!f || (c.name + ' ' + (c.desc || '') + ' ' + group).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(f)));
+      if (cat !== 'all' && cat !== group && !f) continue;
+      const items = CATALOG.list.filter(c => c.group === group && (!f || (c.name + ' ' + (c.desc || '') + ' ' + group).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(f)));
       if (!items.length) continue;
-      html += `<details class="lib-group" ${f || group === 'Composants de base' || group.includes('Boutons') ? 'open' : ''}><summary>${esc(group)} (${items.length})</summary><div class="lib-items">`;
+      if (cat === 'all' || f) html += `<div class="lib-group-title">${esc(GROUP_LABEL(group))}</div>`;
+      html += '<div class="lib-items">';
       for (const c of items) {
         const support = boardSupport(c, fw328, fw2560);
         html += `<div class="lib-item" draggable="true" data-type="${c.type}" title="${esc(c.name + (c.desc ? ' — ' + c.desc : ''))}">${DRAW.thumbnail(c)}${esc(c.name)}${support ? `<span class="so">${support}</span>` : ''}</div>`;
       }
-      html += '</div></details>';
+      html += '</div>';
     }
     list.innerHTML = html || '<p class="hint">Aucun composant trouvé.</p>';
   }
@@ -535,8 +540,10 @@
   }
 
   /* ================================================================ simulation */
+  let serialShown = false;
   function startSim() {
     clearMsgs();
+    serialShown = false;
     let prog;
     try { prog = compileProgram(); }
     catch (e) { showBuildError(e); return; }
@@ -547,7 +554,10 @@
     serialAppend('', true);
     plotter.clear();
     state.sim = new SimLib.Simulator(circuit, {
-      onSerial: t => { serialAppend(t); plotter.feed(t); },
+      onSerial: t => {
+        if (!serialShown) { serialShown = true; if ($('#bottom').classList.contains('collapsed')) showTab('serial'); }
+        serialAppend(t); plotter.feed(t);
+      },
       onWarn: (m, level) => addMsg(m, level),
       onError: m => { addMsg(m, 'error'); }
     });
@@ -586,7 +596,7 @@
     editor.updateDynamic(state.sim);
     audio.update(state.sim.sounds);
     const t = state.sim.timeUs / 1e6;
-    $('#sim-status').textContent = `Simulation : ${t.toFixed(1)} s${r.late ? ' (ralentie : programme très chargé)' : ''}${state.sim.vm && state.sim.vm.halted ? ' — programme arrêté' : ''}`;
+    $('#sim-status').textContent = `Simulation en cours · ${t.toFixed(1)} s${r.late ? ' (ralentie)' : ''}${state.sim.vm && state.sim.vm.halted ? ' — programme arrêté' : ''}`;
     if ($('#pane-plot').classList.contains('active')) plotter.draw();
     requestAnimationFrame(frame);
   }
@@ -821,6 +831,30 @@
       <p class="hint">Micrologiciel : ${esc(FIRMWARE.built)} — ${CATALOG.list.length} composants.</p>`);
   }
 
+  /* ================================================================ accueil */
+  function openExample(i) {
+    loadProject(EXAMPLES[i]);
+    setCodeOpen(true);
+    closeModal();
+    toast('Exemple chargé : cliquez sur « Démarrer la simulation » !');
+  }
+  function welcome() {
+    modal('Bienvenue dans le simulateur Arduino 👋', `<div class="welcome">
+      <p class="hello">Construisez un circuit, programmez-le avec des blocs, simulez-le… puis envoyez-le sur la vraie carte.</p>
+      <div class="welcome-cards">
+        <div class="welcome-card" data-w="new"><div class="ico" style="background:#e8f1fd">✏️</div><b>Nouveau circuit</b><span>Partir d'une carte vide</span></div>
+        <div class="welcome-card" data-w="ex"><div class="ico" style="background:#eaf8f0">💡</div><b>Exemple guidé</b><span>Bouton et LED Grove</span></div>
+        <div class="welcome-card" data-w="open"><div class="ico" style="background:#fff3e6">📂</div><b>Ouvrir un fichier</b><span>Projet ou exercice (.json)</span></div>
+      </div>
+      <div class="ex-list">${EXAMPLES.map((ex, i) => `<button data-ex="${i}">${esc(ex.title)}<small>${esc(ex.desc)}</small></button>`).join('')}</div>
+    </div>`, b => {
+      b.querySelector('[data-w="new"]').onclick = () => { closeModal(); toast('Glissez un composant depuis la colonne de droite pour commencer.'); };
+      b.querySelector('[data-w="ex"]').onclick = () => openExample(1);
+      b.querySelector('[data-w="open"]').onclick = () => { closeModal(); openProject(); };
+      b.querySelectorAll('[data-ex]').forEach(x => x.onclick = () => openExample(+x.dataset.ex));
+    });
+  }
+
   /* ================================================================ onglets, menus, raccourcis */
   function showTab(name) {
     $$('#bottom .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -828,7 +862,13 @@
     $('#bottom').classList.remove('collapsed');
     if (name === 'plot') { plotter.dirty = true; setTimeout(() => plotter.draw(), 20); }
   }
+  function setCodeOpen(open) {
+    document.body.classList.toggle('code-open', open);
+    try { localStorage.setItem('simulateurArduino.codeOpen', open ? '1' : '0'); } catch (e) { /* stockage indisponible */ }
+    setTimeout(() => { Blockly.svgResize(workspace); if (open) workspace.scrollCenter(); }, 20);
+  }
   function showCodeTab(name) {
+    setCodeOpen(true);
     $$('#code-pane .tab').forEach(t => t.classList.toggle('active', t.dataset.ctab === name));
     $$('#code-pane .ctabpane').forEach(p => p.classList.toggle('active', p.id === 'cpane-' + name));
     if (name === 'text') updateCodeView();
@@ -856,8 +896,7 @@
     $('#menu-examples').innerHTML = EXAMPLES.map((ex, i) => `<button data-ex="${i}">${esc(ex.title)}<span class="ex-desc">${esc(ex.desc)}</span></button>`).join('');
     $$('#menu-examples [data-ex]').forEach(b => b.onclick = () => {
       if (!confirm('Ouvrir cet exemple ? Le projet actuel sera remplacé (pensez à l\'enregistrer).')) return;
-      loadProject(EXAMPLES[+b.dataset.ex]);
-      toast('Exemple chargé : cliquez sur « Démarrer la simulation ».');
+      openExample(+b.dataset.ex);
     });
     $('#board-select').onchange = e => setBoard(e.target.value);
     $('#shield-check').onchange = e => setShield(e.target.checked);
@@ -865,7 +904,26 @@
     $('#btn-upload').onclick = uploadDialog;
     $('#btn-consigne').onclick = showConsigne;
     $('#btn-help').onclick = helpDialog;
-    $('#btn-sound').onclick = () => { const on = audio.toggle(); $('#btn-sound').textContent = on ? '🔊' : '🔇'; };
+    $('#btn-sound').onclick = () => {
+      const on = audio.toggle();
+      $('#btn-sound').classList.toggle('off', !on);
+      $('#btn-sound').title = 'Son des buzzers : ' + (on ? 'activé' : 'coupé');
+    };
+    $('#btn-code').onclick = () => setCodeOpen(!document.body.classList.contains('code-open'));
+    $('#code-close').onclick = () => setCodeOpen(false);
+    $('#btn-rotate').onclick = () => { if (!editor.sel) { toast('Sélectionnez d\'abord une pièce du circuit.'); return; } if (guardLock()) { stopSimForEdit(); editor.rotateSelection(); } };
+    $('#btn-delete').onclick = () => { if (!editor.sel) { toast('Sélectionnez d\'abord une pièce ou un fil.'); return; } if (guardLock()) { stopSimForEdit(); editor.deleteSelection(); } };
+    const title = $('#project-title');
+    title.onchange = () => {
+      state.project.title = title.value.trim() || 'Mon projet';
+      title.value = state.project.title;
+      document.title = state.project.title + ' — Simulateur Arduino';
+      autosave();
+    };
+    title.onkeydown = e => { if (e.key === 'Enter') title.blur(); };
+    $('#lib-cat').innerHTML = '<option value="all">Tous les composants</option>' +
+      CATALOG.groups.map(g => `<option value="${esc(g)}">${esc(GROUP_LABEL(g))}</option>`).join('');
+    $('#lib-cat').onchange = () => renderLibrary($('#lib-search').value);
     $('#modal-close').onclick = closeModal;
     $('#modal-bg').onclick = e => { if (e.target.id === 'modal-bg') closeModal(); };
     $$('#bottom .tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -953,6 +1011,7 @@
 
   /* ================================================================ démarrage */
   function init() {
+    document.body.classList.add('code-open');
     setupBlockly();
     plotter = new Plotter($('#plot'), $('#plot-legend'));
     new ResizeObserver(() => { plotter.dirty = true; plotter.draw(); }).observe($('#pane-plot'));
@@ -972,7 +1031,14 @@
     bindUI();
     renderLibrary('');
     state.project = defaultProject();
-    if (!restoreAutosave()) loadProject(EXAMPLES[1], { silent: true });
+    let codeOpen = false;
+    try { codeOpen = localStorage.getItem('simulateurArduino.codeOpen') === '1'; } catch (e) { /* stockage indisponible */ }
+    if (!restoreAutosave()) {
+      state.project = defaultProject();
+      loadProject(defaultProject(), { silent: true });
+      welcome();
+    }
+    setCodeOpen(codeOpen);
     renderMsgs();
     if (!Uploader.supported()) addMsg('Ce navigateur ne permet pas le téléversement USB : utilisez Google Chrome ou Microsoft Edge pour envoyer le programme sur une vraie carte.', 'info');
   }
@@ -982,6 +1048,7 @@
   APP.stop = stopSim;
   APP.loadProject = p => loadProject(p, { silent: true });
   APP.serialize = serialize;
+  APP.setCodeOpen = open => setCodeOpen(open);
   APP.cpp = generateCpp;
   APP.workspace = () => workspace;
   APP.messages = messages;

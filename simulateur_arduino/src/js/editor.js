@@ -395,7 +395,7 @@
       if (this.locked) return;
       this.cancelMode();
       const def = CATALOG.byType[type];
-      const ghost = el('g', { class: 'ghost' });
+      const ghost = el('g', { class: 'place-ghost' });
       const fake = { id: 'ghost', type, def, x: 0, y: 0, rot: 0, props: Object.assign({}, def.props), sim: Object.assign({}, def.sim), rt: {} };
       ghost.innerHTML = DRAW.art(fake, this.c);
       this.gOver.appendChild(ghost);

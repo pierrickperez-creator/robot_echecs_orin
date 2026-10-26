@@ -5,250 +5,365 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Simulateur Arduino</title>
 <style>
+/* Thème clair et chaleureux, inspiré de Tinkercad Circuits */
 :root {
-  --accent: #00979c;
-  --accent-dark: #00777b;
-  --bg: #eef1f5;
+  --blue: #1d6fd8;
+  --blue-dark: #1558b0;
+  --blue-soft: #e8f1fd;
+  --green: #22a45d;
+  --green-dark: #1a8a4c;
+  --orange: #ff8a3d;
+  --yellow: #ffb020;
+  --red: #e5484d;
+  --bg: #eef2f7;
   --panel: #ffffff;
-  --line: #d5dbe3;
-  --text: #1f2933;
-  --muted: #66727f;
-  --danger: #c62828;
-  --warn: #ef6c00;
-  --ok: #2e7d32;
-  --code-w: 46%;
-  --bottom-h: 190px;
+  --line: #dde3eb;
+  --line-soft: #edf1f6;
+  --text: #22303f;
+  --muted: #6b7887;
+  --danger: #d93a3f;
+  --warn: #e07b16;
+  --ok: #22a45d;
+  --accent: var(--blue);
+  --accent-dark: var(--blue-dark);
+  --radius: 12px;
+  --shadow: 0 2px 6px rgba(27, 45, 70, 0.08), 0 8px 24px rgba(27, 45, 70, 0.08);
+  --shadow-sm: 0 1px 3px rgba(27, 45, 70, 0.12);
+  --code-w: 48%;
+  --lib-w: 280px;
+  --bottom-h: 200px;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
-body { font: 13px/1.4 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; color: var(--text); background: var(--bg); }
-button, select, input { font: inherit; }
+body { font: 13.5px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--text); background: var(--bg); }
+button, select, input { font: inherit; color: inherit; }
+svg { flex: none; }
 #app { display: flex; flex-direction: column; height: 100%; }
 
 /* ---------------------------------------------------------------- barre du haut */
-#topbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 48px; flex-wrap: wrap; z-index: 20; }
-.brand { font-weight: 700; font-size: 15px; color: var(--accent-dark); margin-right: 8px; white-space: nowrap; }
-.logo { display: inline-block; width: 26px; height: 26px; line-height: 24px; text-align: center; border-radius: 50%; background: var(--accent); color: #fff; font-size: 18px; margin-right: 4px; }
-.tb { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 6px 10px; cursor: pointer; white-space: nowrap; }
-.tb:hover { background: #f2f6f8; border-color: #b8c3cf; }
-.tb.primary { background: var(--accent); border-color: var(--accent-dark); color: #fff; font-weight: 600; }
-.tb.primary:hover { background: var(--accent-dark); }
-.tb.primary.running { background: var(--danger); border-color: #8e1c1c; }
-.tb-field { display: flex; align-items: center; gap: 6px; color: var(--muted); }
-.tb-field select { padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text); }
+#topbar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--panel); box-shadow: 0 1px 0 var(--line), 0 2px 10px rgba(27, 45, 70, 0.05); min-height: 58px; flex-wrap: nowrap; z-index: 20; }
+.brand { display: flex; align-items: center; gap: 10px; margin-right: 6px; }
+.logo { width: 36px; height: 36px; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.1; }
+#project-title { border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; margin-left: -6px; font-weight: 700; font-size: 15.5px; width: 210px; background: transparent; }
+#project-title:hover { border-color: var(--line); }
+#project-title:focus { outline: none; border-color: var(--blue); background: #fff; }
+.brand-sub { font-size: 11px; color: var(--muted); letter-spacing: 0.3px; }
+.tb { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff; border-radius: 9px; padding: 7px 13px; cursor: pointer; white-space: nowrap; font-weight: 600; transition: background 0.15s, border-color 0.15s, transform 0.1s; }
+.tb svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tb:hover { background: #f4f7fb; border-color: #c7d1dd; }
+.tb:active { transform: translateY(1px); }
+.tb.ghost { border-color: transparent; font-weight: 500; }
+.tb.ghost:hover { background: var(--line-soft); }
+.tb.primary, .tb.run { background: var(--green); border-color: var(--green-dark); color: #fff; box-shadow: 0 2px 0 var(--green-dark); }
+.tb.run:hover, .tb.primary:hover { background: var(--green-dark); }
+.tb.run.running { background: var(--red); border-color: #b7363a; box-shadow: 0 2px 0 #b7363a; }
+.tb.code-btn { background: var(--blue); border-color: var(--blue-dark); color: #fff; box-shadow: 0 2px 0 var(--blue-dark); }
+.tb.code-btn:hover { background: var(--blue-dark); }
+body.code-open .tb.code-btn { background: #fff; color: var(--blue); border-color: var(--blue); box-shadow: none; }
+.caret { display: inline-block; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: 0.6; }
+.icon-btn { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: 9px; cursor: pointer; color: #3d4b5c; }
+.icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn:hover { background: var(--line-soft); color: var(--blue); }
+.icon-btn.off { color: #a3adb9; }
+.tool-group { display: flex; align-items: center; gap: 2px; padding: 2px 4px; margin-left: 4px; background: #f6f8fb; border: 1px solid var(--line-soft); border-radius: 11px; }
+.tg-sep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--line); border-radius: 20px; background: #fff; color: var(--muted); }
+.pill svg { width: 18px; height: 18px; fill: none; stroke: var(--blue); stroke-width: 1.8; stroke-linecap: round; }
+.pill select { border: 0; background: transparent; font-weight: 600; color: var(--text); padding: 4px 2px; cursor: pointer; }
+.pill select:focus { outline: none; }
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text); font-weight: 500; user-select: none; }
+.switch input { display: none; }
+.switch .slider { width: 34px; height: 20px; border-radius: 12px; background: #c9d2dd; position: relative; transition: background 0.2s; }
+.switch .slider::after { content: ''; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm); transition: left 0.2s; }
+.switch input:checked + .slider { background: var(--blue); }
+.switch input:checked + .slider::after { left: 16px; }
+.switch input:disabled + .slider { opacity: 0.5; }
 .check { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-.sep { width: 1px; height: 26px; background: var(--line); margin: 0 4px; }
 .spacer { flex: 1; }
+#topbar > * { flex-shrink: 0; }
+#topbar > .spacer { flex-shrink: 1; min-width: 4px; }
 .menu { position: relative; }
-.dropdown { display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px #0002; min-width: 260px; padding: 6px; z-index: 50; }
-.dropdown.open { display: block; }
-.dropdown button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 5px; cursor: pointer; }
-.dropdown button:hover { background: #eef6f6; }
-.dropdown hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
-.dropdown .ex-desc { display: block; color: var(--muted); font-size: 11px; }
+.dropdown { display: none; position: absolute; top: calc(100% + 6px); left: 0; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); min-width: 270px; padding: 6px; z-index: 50; }
+.dropdown.wide { min-width: 360px; max-height: 70vh; overflow-y: auto; }
+.dropdown.open { display: block; animation: pop 0.12s ease-out; }
+.dropdown button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 11px; border-radius: 8px; cursor: pointer; }
+.dropdown button:hover { background: var(--blue-soft); }
+.dropdown hr { border: 0; border-top: 1px solid var(--line-soft); margin: 5px 0; }
+.dropdown .ex-desc { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+@keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 /* ---------------------------------------------------------------- disposition */
 #main { flex: 1; display: flex; min-height: 0; }
-#library { width: 220px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-#lib-search { margin: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
-#lib-list { overflow-y: auto; flex: 1; padding: 0 6px 10px; }
-.lib-group > summary { cursor: pointer; font-weight: 600; padding: 6px 4px; color: var(--accent-dark); list-style: none; user-select: none; }
-.lib-group > summary::before { content: '▸ '; }
-.lib-group[open] > summary::before { content: '▾ '; }
-.lib-items { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 2px 2px 8px; }
-.lib-item { border: 1px solid var(--line); border-radius: 6px; padding: 4px; background: #fafbfc; cursor: grab; text-align: center; font-size: 10.5px; line-height: 1.2; user-select: none; }
-.lib-item:hover { border-color: var(--accent); background: #f1fafa; }
-.lib-item svg { width: 100%; height: 56px; display: block; margin-bottom: 3px; pointer-events: none; }
-.lib-item .so { display: block; color: var(--warn); font-size: 9.5px; }
-#library.locked { opacity: 0.45; pointer-events: none; }
-
-#circuit-pane { flex: 1; display: flex; flex-direction: column; min-width: 300px; min-height: 0; }
+#circuit-pane { flex: 1; display: flex; flex-direction: column; min-width: 320px; min-height: 0; }
 #circuit-wrap { flex: 1; position: relative; min-height: 0; overflow: hidden; }
-#circuit { width: 100%; height: 100%; display: block; background-color: #fafbfd; background-image: radial-gradient(#cfd6df 0.8px, transparent 0.8px); cursor: default; touch-action: none; }
+#circuit { width: 100%; height: 100%; display: block; background-color: #ffffff;
+  background-image: linear-gradient(to right, #eef3f9 1px, transparent 1px), linear-gradient(to bottom, #eef3f9 1px, transparent 1px);
+  cursor: default; touch-action: none; }
 #circuit.placing, #circuit.wiring { cursor: crosshair; }
-#circuit-tools { position: absolute; left: 10px; top: 10px; display: flex; flex-direction: column; gap: 4px; }
-#circuit-tools button { width: 32px; height: 32px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; font-size: 15px; }
-#circuit-tools button:hover { border-color: var(--accent); }
-#sim-status { position: absolute; left: 52px; top: 12px; font-size: 12px; color: var(--muted); background: #fffc; padding: 3px 8px; border-radius: 6px; pointer-events: none; }
+#circuit-tools { position: absolute; left: 14px; bottom: 14px; display: flex; flex-direction: column; background: #fff; border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+#circuit-tools button { width: 38px; height: 36px; border: 0; border-bottom: 1px solid var(--line-soft); background: #fff; cursor: pointer; font-size: 17px; color: #3d4b5c; display: flex; align-items: center; justify-content: center; }
+#circuit-tools button:last-child { border-bottom: 0; }
+#circuit-tools button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+#circuit-tools button:hover { background: var(--blue-soft); color: var(--blue); }
+#sim-status { position: absolute; left: 14px; top: 14px; font-size: 12.5px; color: #fff; background: var(--green); padding: 5px 12px; border-radius: 20px; pointer-events: none; box-shadow: var(--shadow-sm); font-weight: 600; }
+#sim-status::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #c8ffd9; margin-right: 7px; animation: pulse 1.2s infinite; }
 #sim-status:empty { display: none; }
-#lock-badge { position: absolute; left: 50%; transform: translateX(-50%); top: 10px; background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; padding: 4px 12px; border-radius: 20px; font-size: 12px; }
-.pin-tip { position: absolute; display: none; background: #263238; color: #fff; font-size: 11px; padding: 3px 7px; border-radius: 4px; pointer-events: none; white-space: nowrap; z-index: 5; }
-#toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: #263238; color: #fff; padding: 8px 14px; border-radius: 8px; max-width: 80%; box-shadow: 0 6px 20px #0003; z-index: 6; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+#lock-badge { position: absolute; left: 50%; transform: translateX(-50%); top: 14px; background: #fff4e5; color: #b35a00; border: 1px solid #ffd19a; padding: 5px 14px; border-radius: 20px; font-size: 12.5px; font-weight: 600; }
+.pin-tip { position: absolute; display: none; background: #22303f; color: #fff; font-size: 11.5px; padding: 4px 9px; border-radius: 7px; pointer-events: none; white-space: nowrap; z-index: 5; box-shadow: var(--shadow-sm); }
+#toast { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); background: #22303f; color: #fff; padding: 10px 18px; border-radius: 12px; max-width: 80%; box-shadow: var(--shadow); z-index: 6; animation: pop 0.15s ease-out; }
 
 /* éléments SVG */
 .comp { cursor: move; }
 .comp .hit { pointer-events: all; }
+.comp:hover .art { filter: drop-shadow(0 0 3px rgba(29, 111, 216, 0.45)); }
 .wire { cursor: pointer; }
 .wire-hit { stroke: transparent; stroke-width: 7; fill: none; }
 .wire-shadow { stroke: #0003; stroke-width: 3.6; fill: none; stroke-linejoin: round; stroke-linecap: round; transform: translate(0.5px, 0.7px); pointer-events: none; }
 .wire-line { stroke-width: 2.6; fill: none; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
-.wire.selected .wire-line { stroke-width: 3.4; filter: drop-shadow(0 0 2px #00b8d4); }
+.wire.selected .wire-line { stroke-width: 3.4; filter: drop-shadow(0 0 2px #2b8cff); }
 .wire-end { pointer-events: none; }
 .cable { cursor: pointer; }
 .cable-hit { stroke: transparent; stroke-width: 10; fill: none; }
 .cable-body { stroke: #555; stroke-width: 8; fill: none; stroke-linecap: round; opacity: 0.9; pointer-events: none; }
 .cable-wire { stroke-width: 1.3; fill: none; pointer-events: none; }
 .cable-plug { fill: #f3efe2; stroke: #8d8a7f; pointer-events: none; }
-.cable.selected .cable-body { stroke: #00b8d4; }
-.rubber { stroke: #00b8d4; stroke-width: 2; fill: none; stroke-dasharray: 4 3; pointer-events: none; }
+.cable.selected .cable-body { stroke: #2b8cff; }
+.rubber { stroke: var(--blue); stroke-width: 2; fill: none; stroke-dasharray: 4 3; pointer-events: none; }
 .rubber-cable { opacity: 0.6; pointer-events: none; }
-.sel-box { fill: none; stroke: #00b8d4; stroke-width: 1.2; stroke-dasharray: 4 3; pointer-events: none; }
-.pin-hover { fill: #00e5ff; fill-opacity: 0.5; stroke: #00838f; stroke-width: 1; pointer-events: none; }
-.ghost { opacity: 0.55; pointer-events: none; }
+.sel-box { fill: rgba(29, 111, 216, 0.04); stroke: var(--blue); stroke-width: 1.2; stroke-dasharray: 4 3; pointer-events: none; }
+.pin-hover { fill: #ff8a3d; fill-opacity: 0.55; stroke: #e0661d; stroke-width: 1; pointer-events: none; }
+.place-ghost { opacity: 0.55; pointer-events: none; }
 .port { cursor: crosshair; }
-.port:hover rect:first-child { stroke: #00b8d4; stroke-width: 1.5; }
+.port:hover rect:first-child { stroke: #ff8a3d; stroke-width: 1.6; }
 .grove-conn { cursor: crosshair; }
-.grove-conn:hover rect:first-child { stroke: #00b8d4; stroke-width: 1.5; }
+.grove-conn:hover rect:first-child { stroke: #ff8a3d; stroke-width: 1.6; }
 
-/* panneau des propriétés */
-#props { position: absolute; right: 10px; top: 10px; width: 270px; max-height: calc(100% - 20px); overflow-y: auto; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 26px #0002; padding: 10px 12px; z-index: 4; }
-#props h3 { margin: 0 0 4px; font-size: 14px; }
-#props .desc { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
-#props .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
-#props .row > label { flex: 0 0 92px; color: var(--muted); font-size: 12px; }
-#props .row input[type=range] { flex: 1; }
-#props .row .val { min-width: 54px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
-#props select, #props input[type=number], #props input[type=text] { flex: 1; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; min-width: 0; }
-#props .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-#props .section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-weight: 600; font-size: 12px; color: var(--accent-dark); }
-#props .note { font-size: 11.5px; color: var(--warn); margin: 4px 0; }
-#props .note.ok { color: var(--ok); }
-.mini { border: 1px solid var(--line); background: #fff; border-radius: 5px; padding: 3px 9px; cursor: pointer; font-size: 12px; }
-.mini:hover { border-color: var(--accent); }
+/* panneau des propriétés (bulle flottante) */
+#props { position: absolute; right: 14px; top: 14px; width: 280px; max-height: calc(100% - 28px); overflow-y: auto; background: #fff; border-radius: 14px; box-shadow: var(--shadow); padding: 14px 16px; z-index: 4; animation: pop 0.12s ease-out; }
+#props h3 { margin: 0 0 4px; font-size: 15px; }
+#props .desc { color: var(--muted); font-size: 12.5px; margin: 0 0 8px; }
+#props .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+#props .row > label { flex: 0 0 92px; color: var(--muted); font-size: 12.5px; }
+#props .row input[type=range] { flex: 1; accent-color: var(--blue); }
+#props .row .val { min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12.5px; font-weight: 600; }
+#props select, #props input[type=number], #props input[type=text] { flex: 1; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; background: #fff; }
+#props .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+#props .section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-weight: 700; font-size: 12px; color: var(--blue); text-transform: uppercase; letter-spacing: 0.4px; }
+#props .note { font-size: 12px; color: var(--warn); margin: 4px 0; background: #fff6ec; padding: 6px 9px; border-radius: 8px; }
+#props .note.ok { color: var(--ok); background: #eaf8f0; }
+.mini { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; transition: background 0.15s; }
+.mini:hover { border-color: var(--blue); color: var(--blue); }
 .mini.danger { color: var(--danger); }
-.mini.active, .mini.on { background: var(--accent); color: #fff; border-color: var(--accent-dark); }
-.swatches { display: flex; flex-wrap: wrap; gap: 4px; }
-.swatch { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #0003; cursor: pointer; }
-.keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; }
-.keys button { padding: 6px 0; }
+.mini.danger:hover { border-color: var(--danger); background: #fff0f0; }
+.mini.active, .mini.on { background: var(--blue); color: #fff; border-color: var(--blue-dark); }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #0002; cursor: pointer; }
+.swatch:hover { transform: scale(1.15); }
+.keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 6px; }
+.keys button { padding: 7px 0; }
 
 /* ---------------------------------------------------------------- panneau du bas */
-#bottom { height: var(--bottom-h); background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column; min-height: 34px; }
-#bottom.collapsed { height: 34px; }
-.tabs { display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--line); min-height: 34px; background: #f7f9fb; }
-.tab { border: 0; background: none; padding: 8px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
-.tab.active { color: var(--accent-dark); border-bottom-color: var(--accent); font-weight: 600; }
-.badge { background: var(--danger); color: #fff; border-radius: 10px; padding: 0 6px; font-size: 11px; }
+#bottom { height: var(--bottom-h); background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column; min-height: 38px; }
+#bottom.collapsed { height: 38px; }
+#bottom.collapsed .tab.active { border-bottom-color: transparent; }
+.tabs { display: flex; align-items: center; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); min-height: 38px; background: #fafbfd; }
+.tab { border: 0; background: none; padding: 9px 12px; cursor: pointer; color: var(--muted); border-bottom: 2.5px solid transparent; font-weight: 600; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+.badge { background: var(--danger); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 11px; margin-left: 3px; }
 .tabpane, .ctabpane { display: none; flex: 1; min-height: 0; }
 .tabpane.active, .ctabpane.active { display: flex; flex-direction: column; }
-.serial-bar { display: flex; align-items: center; gap: 10px; padding: 4px 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
-.serial-bar select { padding: 2px 4px; }
-#serial-out { flex: 1; margin: 0; padding: 6px 10px; overflow-y: auto; background: #1e252b; color: #e0f2f1; font: 12px/1.35 Consolas, "Courier New", monospace; white-space: pre-wrap; word-break: break-all; }
-.serial-in { display: flex; gap: 6px; padding: 4px 8px; }
-.serial-in input { flex: 1; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; }
+.serial-bar { display: flex; align-items: center; gap: 12px; padding: 5px 10px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+.serial-bar select { padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; }
+#serial-out { flex: 1; margin: 0 10px; padding: 8px 12px; overflow-y: auto; background: #1f2a36; color: #d6f5e6; border-radius: 10px; font: 12.5px/1.4 Consolas, "Cascadia Mono", "Courier New", monospace; white-space: pre-wrap; word-break: break-all; }
+.serial-in { display: flex; gap: 6px; padding: 6px 10px; }
+.serial-in input, .serial-in select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.serial-in input { flex: 1; }
 #pane-plot { position: relative; }
 #plot { flex: 1; width: 100%; min-height: 0; background: #fff; }
-#plot-legend { position: absolute; right: 10px; top: 6px; font-size: 12px; background: #fffd; padding: 2px 6px; border-radius: 4px; }
+#plot-legend { position: absolute; right: 12px; top: 8px; font-size: 12px; background: #fffe; padding: 3px 8px; border-radius: 8px; box-shadow: var(--shadow-sm); }
 #plot-legend span { margin-left: 10px; }
-#msgs { list-style: none; margin: 0; padding: 4px 8px; overflow-y: auto; flex: 1; }
-#msgs li { padding: 5px 4px; border-bottom: 1px solid #eef1f4; font-size: 12.5px; }
+#msgs { list-style: none; margin: 0; padding: 6px 10px; overflow-y: auto; flex: 1; }
+#msgs li { padding: 7px 10px; border-radius: 8px; margin-bottom: 4px; font-size: 12.8px; background: #f7f9fc; }
+#msgs li.error { background: #fff1f1; }
+#msgs li.warn { background: #fff7ec; }
 #msgs li.error::before { content: '⛔ '; }
 #msgs li.warn::before { content: '⚠️ '; }
 #msgs li.info::before { content: 'ℹ️ '; }
-#msgs li.clickable { cursor: pointer; text-decoration: underline dotted; }
+#msgs li.clickable { cursor: pointer; }
+#msgs li.clickable:hover { text-decoration: underline; }
 
-/* ---------------------------------------------------------------- code */
-#splitter { width: 6px; cursor: col-resize; background: var(--line); }
-#splitter:hover { background: var(--accent); }
-#code-pane { width: var(--code-w); min-width: 280px; display: flex; flex-direction: column; background: var(--panel); min-height: 0; }
+/* ---------------------------------------------------------------- bibliothèque de composants (à droite, comme Tinkercad) */
+#library { width: var(--lib-w); background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+body.code-open #library { display: none; }
+.lib-head { padding: 12px 14px 8px; border-bottom: 1px solid var(--line-soft); }
+.lib-head h2 { margin: 0 0 8px; font-size: 16px; }
+#lib-cat { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: #fff; font-weight: 600; cursor: pointer; }
+.search { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; background: #f7f9fc; }
+.search svg { width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
+.search input { flex: 1; border: 0; background: transparent; padding: 7px 0; }
+.search input:focus { outline: none; }
+.search:focus-within { border-color: var(--blue); background: #fff; }
+#lib-list { overflow-y: auto; flex: 1; padding: 8px 12px 12px; }
+.lib-group-title { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 10px 2px 6px; }
+.lib-items { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.lib-item { border: 1px solid var(--line-soft); border-radius: 12px; padding: 8px 6px 7px; background: #fff; cursor: grab; text-align: center; font-size: 11.5px; line-height: 1.25; user-select: none; transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s; }
+.lib-item:hover { border-color: #b9d3f5; box-shadow: var(--shadow); transform: translateY(-2px); }
+.lib-item:active { cursor: grabbing; }
+.lib-item svg { width: 100%; height: 62px; display: block; margin-bottom: 5px; pointer-events: none; }
+.lib-item .so { display: block; color: var(--warn); font-size: 10px; margin-top: 2px; }
+.lib-tip { margin: 0; padding: 8px 14px 12px; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--line-soft); }
+#library.locked { opacity: 0.45; pointer-events: none; }
+
+/* ---------------------------------------------------------------- code (s'ouvre à la place des composants) */
+#splitter { width: 6px; cursor: col-resize; background: var(--line-soft); display: none; }
+#splitter:hover { background: var(--blue); }
+#code-pane { width: var(--code-w); min-width: 340px; display: none; flex-direction: column; background: var(--panel); min-height: 0; border-left: 1px solid var(--line); }
+body.code-open #code-pane { display: flex; }
+body.code-open #splitter { display: block; }
 #blockly { flex: 1; min-height: 0; }
-.hint { color: var(--muted); font-size: 11.5px; padding: 0 6px; }
-.code-bar { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
+.hint { color: var(--muted); font-size: 12px; padding: 0 6px; }
+.code-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
 .code-bar .hint { flex: 1; }
-#code-view { flex: 1; margin: 0; padding: 10px 12px; overflow: auto; background: #fbfcfd; font: 12.5px/1.45 Consolas, "Courier New", monospace; color: #263238; tab-size: 2; }
-#code-view .kw { color: #00838f; font-weight: 600; }
-#code-view .ty { color: #7b1fa2; }
-#code-view .co { color: #8a8f94; font-style: italic; }
-#code-view .st { color: #2e7d32; }
-#code-view .nu { color: #c2185b; }
-#code-view .pp { color: #ef6c00; }
-.blocklyTreeLabel, .blocklyToolboxCategoryLabel { font-size: 12.5px !important; }
+#code-view { flex: 1; margin: 0; padding: 12px 14px; overflow: auto; background: #fbfcfe; font: 12.8px/1.5 Consolas, "Cascadia Mono", "Courier New", monospace; color: #263238; tab-size: 2; }
+#code-view .kw { color: #1d6fd8; font-weight: 600; }
+#code-view .ty { color: #8a3ffc; }
+#code-view .co { color: #8a94a0; font-style: italic; }
+#code-view .st { color: #1a8a4c; }
+#code-view .nu { color: #d6336c; }
+#code-view .pp { color: #e07b16; }
+.blocklyTreeLabel, .blocklyToolboxCategoryLabel { font-size: 13px !important; }
 
 /* ---------------------------------------------------------------- fenêtres */
-#modal-bg { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 100; }
+#modal-bg { position: fixed; inset: 0; background: rgba(23, 34, 48, 0.45); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 100; }
 #modal-bg[hidden] { display: none; }
-.modal { background: #fff; border-radius: 12px; width: min(720px, 94vw); max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px #0005; }
-.modal-head { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-.modal-head h2 { flex: 1; margin: 0; font-size: 17px; }
-.modal-body { padding: 14px 18px; overflow-y: auto; }
-.modal-body h3 { margin: 14px 0 6px; font-size: 14px; color: var(--accent-dark); }
-.modal-body p, .modal-body li { line-height: 1.5; }
-.modal-body textarea { width: 100%; min-height: 220px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; font: 13px/1.45 inherit; }
-.modal-body input[type=text] { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
-.modal-body .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
-.modal-body .tb { padding: 7px 14px; }
+.modal { background: #fff; border-radius: 18px; width: min(720px, 94vw); max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 24px 70px rgba(10, 20, 35, 0.35); animation: pop 0.15s ease-out; }
+.modal-head { display: flex; align-items: center; padding: 16px 20px 10px; }
+.modal-head h2 { flex: 1; margin: 0; font-size: 19px; }
+#modal-close { border: 0; background: var(--line-soft); width: 32px; height: 32px; border-radius: 50%; }
+.modal-body { padding: 6px 22px 20px; overflow-y: auto; }
+.modal-body h3 { margin: 16px 0 6px; font-size: 14.5px; color: var(--blue); }
+.modal-body p, .modal-body li { line-height: 1.55; }
+.modal-body textarea { width: 100%; min-height: 220px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; font: 13px/1.45 inherit; }
+.modal-body input[type=text] { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.modal-body .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+.modal-body .tb { padding: 8px 16px; }
 .progress { height: 12px; background: #e8edf2; border-radius: 6px; overflow: hidden; margin: 10px 0; }
-.progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
-.log { background: #1e252b; color: #e0f2f1; font: 12px/1.4 Consolas, monospace; padding: 8px; border-radius: 6px; white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
-.callout { background: #e0f2f1; border-left: 4px solid var(--accent); padding: 8px 12px; border-radius: 4px; margin: 8px 0; }
-.callout.warn { background: #fff3e0; border-color: var(--warn); }
+.progress > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--blue), #49a3ff); transition: width 0.15s; }
+.log { background: #1f2a36; color: #d6f5e6; font: 12px/1.4 Consolas, monospace; padding: 10px; border-radius: 10px; white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
+.callout { background: var(--blue-soft); border-left: 4px solid var(--blue); padding: 9px 13px; border-radius: 8px; margin: 8px 0; }
+.callout.warn { background: #fff6ec; border-color: var(--warn); }
 .consigne { font-size: 14px; }
-.consigne h1, .consigne h2 { font-size: 16px; color: var(--accent-dark); }
-kbd { background: #eef1f5; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 12px; }
+.consigne h1, .consigne h2 { font-size: 16px; color: var(--blue); }
+kbd { background: #f1f4f8; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; font-size: 12px; }
+
+/* écran d'accueil */
+.welcome { text-align: center; }
+.welcome .hello { font-size: 15px; color: var(--muted); margin: 0 0 18px; }
+.welcome-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.welcome-card { border: 1px solid var(--line); border-radius: 16px; padding: 18px 12px 16px; background: #fff; cursor: pointer; transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s; }
+.welcome-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: #b9d3f5; }
+.welcome-card .ico { width: 54px; height: 54px; border-radius: 16px; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; font-size: 26px; }
+.welcome-card b { display: block; font-size: 14.5px; margin-bottom: 4px; }
+.welcome-card span { font-size: 12px; color: var(--muted); }
+.welcome .ex-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; text-align: left; }
+.welcome .ex-list button { border: 1px solid var(--line-soft); background: #f7f9fc; border-radius: 10px; padding: 9px 11px; cursor: pointer; text-align: left; }
+.welcome .ex-list button:hover { background: var(--blue-soft); border-color: #b9d3f5; }
+.welcome .ex-list small { display: block; color: var(--muted); }
+/* écrans plus étroits (salles informatiques en 1366 × 768) */
+@media (max-width: 1520px) {
+  #project-title { width: 160px; }
+  .brand-sub { display: none; }
+  .tb { padding: 7px 10px; }
+  #btn-upload .lbl { display: none; }
+}
+@media (max-width: 1320px) {
+  :root { --lib-w: 240px; }
+  .lbl-long { display: none; }
+  .tool-group { margin-left: 0; }
+  .menu .tb.ghost { padding: 7px 7px; }
+  #project-title { width: 130px; }
+  .pill { padding-left: 6px; }
+  .pill svg { display: none; }
+}
+@media (max-width: 1150px) {
+  .brand-text { display: none; }
+  #btn-consigne, #btn-sound { display: none; }
+}
 
 </style>
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <div class="brand"><span class="logo">∞</span> Simulateur Arduino</div>
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><rect x="2" y="2" width="36" height="36" rx="10" fill="#1d6fd8"/>
+        <path d="M11 20c0-3 2-5 4.5-5s3.7 2 4.5 5c.8 3 2 5 4.5 5s4.5-2 4.5-5-2-5-4.5-5-3.7 2-4.5 5c-.8 3-2 5-4.5 5S11 23 11 20z" fill="none" stroke="#fff" stroke-width="2.6"/>
+        <circle cx="31" cy="9" r="4" fill="#ffb020"/></svg>
+      <div class="brand-text">
+        <input id="project-title" value="Mon projet" title="Nom du projet (cliquer pour le modifier)" spellcheck="false">
+        <span class="brand-sub">Simulateur Arduino</span>
+      </div>
+    </div>
     <div class="menu">
-      <button class="tb" data-menu="file">Fichier ▾</button>
+      <button class="tb ghost" data-menu="file">Fichier <i class="caret"></i></button>
       <div class="dropdown" id="menu-file">
-        <button data-act="new">Nouveau projet</button>
-        <button data-act="open">Ouvrir un projet…</button>
-        <button data-act="save">Enregistrer le projet</button>
+        <button data-act="new">✚ Nouveau projet</button>
+        <button data-act="open">📂 Ouvrir un projet…</button>
+        <button data-act="save">💾 Enregistrer le projet</button>
         <hr>
         <button data-act="export-ino">Exporter le code Arduino (.ino)</button>
         <button data-act="export-hex">Exporter le fichier .hex</button>
         <hr>
-        <button data-act="teacher">Mode enseignant (exercice)…</button>
+        <button data-act="teacher">🎓 Mode enseignant (exercice)…</button>
       </div>
     </div>
     <div class="menu">
-      <button class="tb" data-menu="examples">Exemples ▾</button>
-      <div class="dropdown" id="menu-examples"></div>
+      <button class="tb ghost" data-menu="examples">Exemples <i class="caret"></i></button>
+      <div class="dropdown wide" id="menu-examples"></div>
     </div>
-    <div class="sep"></div>
-    <label class="tb-field">Carte
+    <div class="tool-group" role="toolbar" aria-label="Outils du circuit">
+      <button class="icon-btn" id="btn-undo" title="Annuler (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 7H5V3M5.5 7.5A8 8 0 1 1 4 13"/></svg></button>
+      <button class="icon-btn" id="btn-redo" title="Rétablir (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M15 7h4V3M18.5 7.5A8 8 0 1 0 20 13"/></svg></button>
+      <span class="tg-sep"></span>
+      <button class="icon-btn" id="btn-rotate" title="Tourner la pièce sélectionnée (R)"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
+      <button class="icon-btn" id="btn-delete" title="Supprimer la sélection (Suppr)"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>
+    </div>
+    <div class="spacer"></div>
+    <label class="pill" title="Carte Arduino">
+      <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 6V4M11 6V4M15 6V4M7 18v2M11 18v2M15 18v2"/></svg>
       <select id="board-select">
         <option value="uno">Arduino Uno</option>
         <option value="nano">Arduino Nano</option>
-        <option value="mega">Arduino Mega 2560</option>
+        <option value="mega">Arduino Mega</option>
       </select>
     </label>
-    <label class="tb-field check"><input type="checkbox" id="shield-check"> Shield Grove</label>
-    <div class="sep"></div>
-    <button class="tb primary" id="btn-run" title="Démarrer / arrêter la simulation (F5)">▶ Démarrer la simulation</button>
-    <button class="tb" id="btn-upload" title="Envoyer le programme sur la vraie carte par USB">⬆ Téléverser sur la carte</button>
-    <div class="spacer"></div>
-    <button class="tb" id="btn-consigne" title="Consigne de l'exercice">📋 Consigne</button>
-    <button class="tb" id="btn-sound" title="Son des buzzers">🔊</button>
-    <button class="tb" id="btn-help" title="Aide">?</button>
+    <label class="switch" title="Ajouter le shield Grove sur la carte"><input type="checkbox" id="shield-check"><span class="slider"></span><span><span class="lbl-long">Shield </span>Grove</span></label>
+    <button class="tb code-btn" id="btn-code" title="Afficher la programmation par blocs"><svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg> Code</button>
+    <button class="tb run" id="btn-run" title="Démarrer / arrêter la simulation (F5)">▶ Démarrer la simulation</button>
+    <button class="tb" id="btn-upload" title="Envoyer le programme sur la vraie carte par USB"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg><span class="lbl">Téléverser</span></button>
+    <button class="icon-btn" id="btn-consigne" title="Consigne de l'exercice"><svg viewBox="0 0 24 24"><path d="M9 4h6v3H9zM7 5H5v16h14V5h-2M8 12h8M8 16h5"/></svg></button>
+    <button class="icon-btn" id="btn-sound" title="Son des buzzers : activé"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+    <button class="icon-btn" id="btn-help" title="Aide"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></button>
   </header>
 
   <main id="main">
-    <aside id="library">
-      <input id="lib-search" type="search" placeholder="Rechercher un composant…">
-      <div id="lib-list"></div>
-    </aside>
-
     <section id="circuit-pane">
       <div id="circuit-wrap">
         <svg id="circuit" xmlns="http://www.w3.org/2000/svg"></svg>
         <div id="circuit-tools">
           <button data-zoom="in" title="Zoomer">＋</button>
           <button data-zoom="out" title="Dézoomer">－</button>
-          <button data-zoom="fit" title="Tout afficher">⤢</button>
-          <button id="btn-undo" title="Annuler (Ctrl+Z)">↶</button>
-          <button id="btn-redo" title="Rétablir (Ctrl+Y)">↷</button>
+          <button data-zoom="fit" title="Tout afficher"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
         </div>
         <div id="sim-status"></div>
         <div id="lock-badge" hidden>🔒 Circuit verrouillé par l'enseignant</div>
         <div id="props" hidden></div>
         <div id="toast" hidden></div>
       </div>
-      <div id="bottom">
+      <div id="bottom" class="collapsed">
         <div class="tabs">
           <button class="tab active" data-tab="serial">Moniteur série</button>
           <button class="tab" data-tab="plot">Traceur série</button>
@@ -288,10 +403,11 @@ kbd { background: #eef1f5; border: 1px solid var(--line); border-bottom-width: 2
 
     <section id="code-pane">
       <div class="tabs">
-        <button class="tab active" data-ctab="blocks">Blocs</button>
+        <button class="tab active" data-ctab="blocks">🧩 Blocs</button>
         <button class="tab" data-ctab="text">Code Arduino</button>
         <div class="spacer"></div>
         <span id="prog-size" class="hint"></span>
+        <button class="mini" id="code-close" title="Revenir aux composants">Composants ›</button>
       </div>
       <div class="ctabpane active" id="cpane-blocks"><div id="blockly"></div></div>
       <div class="ctabpane" id="cpane-text">
@@ -300,6 +416,17 @@ kbd { background: #eef1f5; border: 1px solid var(--line); border-bottom-width: 2
         <pre id="code-view"></pre>
       </div>
     </section>
+
+    <aside id="library">
+      <div class="lib-head">
+        <h2>Composants</h2>
+        <select id="lib-cat" title="Famille de composants"></select>
+        <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+          <input id="lib-search" type="search" placeholder="Rechercher…"></div>
+      </div>
+      <div id="lib-list"></div>
+      <p class="lib-tip">Glissez un composant sur le plan de travail, ou cliquez dessus puis dans le circuit.</p>
+    </aside>
   </main>
 </div>
 
@@ -6250,7 +6377,7 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
       if (this.locked) return;
       this.cancelMode();
       const def = CATALOG.byType[type];
-      const ghost = el('g', { class: 'ghost' });
+      const ghost = el('g', { class: 'place-ghost' });
       const fake = { id: 'ghost', type, def, x: 0, y: 0, rot: 0, props: Object.assign({}, def.props), sim: Object.assign({}, def.sim), rt: {} };
       ghost.innerHTML = DRAW.art(fake, this.c);
       this.gOver.appendChild(ghost);
@@ -8906,6 +9033,7 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     updateCodeView();
     clearMsgs();
     document.title = state.project.title + ' — Simulateur Arduino';
+    $('#project-title').value = state.project.title;
     if (!opts.silent && state.project.exercise && state.project.exercise.text) showConsigne();
     $('#btn-consigne').style.display = state.project.exercise ? '' : 'none';
     autosave();
@@ -8977,20 +9105,24 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
   }
 
   /* ================================================================ bibliothèque */
+  const GROUP_LABEL = g => (g === 'Composants de base' ? 'Basiques' : g.replace('Grove – ', 'Grove : '));
   function renderLibrary(filter) {
     const list = $('#lib-list');
-    const f = (filter || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const f = (filter || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const cat = $('#lib-cat').value;
     const fw328 = FIRMWARE.images.atmega328p.sys, fw2560 = FIRMWARE.images.atmega2560.sys;
     let html = '';
     for (const group of CATALOG.groups) {
-      const items = CATALOG.list.filter(c => c.group === group && (!f || (c.name + ' ' + (c.desc || '') + ' ' + group).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(f)));
+      if (cat !== 'all' && cat !== group && !f) continue;
+      const items = CATALOG.list.filter(c => c.group === group && (!f || (c.name + ' ' + (c.desc || '') + ' ' + group).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(f)));
       if (!items.length) continue;
-      html += `<details class="lib-group" ${f || group === 'Composants de base' || group.includes('Boutons') ? 'open' : ''}><summary>${esc(group)} (${items.length})</summary><div class="lib-items">`;
+      if (cat === 'all' || f) html += `<div class="lib-group-title">${esc(GROUP_LABEL(group))}</div>`;
+      html += '<div class="lib-items">';
       for (const c of items) {
         const support = boardSupport(c, fw328, fw2560);
         html += `<div class="lib-item" draggable="true" data-type="${c.type}" title="${esc(c.name + (c.desc ? ' — ' + c.desc : ''))}">${DRAW.thumbnail(c)}${esc(c.name)}${support ? `<span class="so">${support}</span>` : ''}</div>`;
       }
-      html += '</div></details>';
+      html += '</div>';
     }
     list.innerHTML = html || '<p class="hint">Aucun composant trouvé.</p>';
   }
@@ -9236,8 +9368,10 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
   }
 
   /* ================================================================ simulation */
+  let serialShown = false;
   function startSim() {
     clearMsgs();
+    serialShown = false;
     let prog;
     try { prog = compileProgram(); }
     catch (e) { showBuildError(e); return; }
@@ -9248,7 +9382,10 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     serialAppend('', true);
     plotter.clear();
     state.sim = new SimLib.Simulator(circuit, {
-      onSerial: t => { serialAppend(t); plotter.feed(t); },
+      onSerial: t => {
+        if (!serialShown) { serialShown = true; if ($('#bottom').classList.contains('collapsed')) showTab('serial'); }
+        serialAppend(t); plotter.feed(t);
+      },
       onWarn: (m, level) => addMsg(m, level),
       onError: m => { addMsg(m, 'error'); }
     });
@@ -9287,7 +9424,7 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     editor.updateDynamic(state.sim);
     audio.update(state.sim.sounds);
     const t = state.sim.timeUs / 1e6;
-    $('#sim-status').textContent = `Simulation : ${t.toFixed(1)} s${r.late ? ' (ralentie : programme très chargé)' : ''}${state.sim.vm && state.sim.vm.halted ? ' — programme arrêté' : ''}`;
+    $('#sim-status').textContent = `Simulation en cours · ${t.toFixed(1)} s${r.late ? ' (ralentie)' : ''}${state.sim.vm && state.sim.vm.halted ? ' — programme arrêté' : ''}`;
     if ($('#pane-plot').classList.contains('active')) plotter.draw();
     requestAnimationFrame(frame);
   }
@@ -9522,6 +9659,30 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
       <p class="hint">Micrologiciel : ${esc(FIRMWARE.built)} — ${CATALOG.list.length} composants.</p>`);
   }
 
+  /* ================================================================ accueil */
+  function openExample(i) {
+    loadProject(EXAMPLES[i]);
+    setCodeOpen(true);
+    closeModal();
+    toast('Exemple chargé : cliquez sur « Démarrer la simulation » !');
+  }
+  function welcome() {
+    modal('Bienvenue dans le simulateur Arduino 👋', `<div class="welcome">
+      <p class="hello">Construisez un circuit, programmez-le avec des blocs, simulez-le… puis envoyez-le sur la vraie carte.</p>
+      <div class="welcome-cards">
+        <div class="welcome-card" data-w="new"><div class="ico" style="background:#e8f1fd">✏️</div><b>Nouveau circuit</b><span>Partir d'une carte vide</span></div>
+        <div class="welcome-card" data-w="ex"><div class="ico" style="background:#eaf8f0">💡</div><b>Exemple guidé</b><span>Bouton et LED Grove</span></div>
+        <div class="welcome-card" data-w="open"><div class="ico" style="background:#fff3e6">📂</div><b>Ouvrir un fichier</b><span>Projet ou exercice (.json)</span></div>
+      </div>
+      <div class="ex-list">${EXAMPLES.map((ex, i) => `<button data-ex="${i}">${esc(ex.title)}<small>${esc(ex.desc)}</small></button>`).join('')}</div>
+    </div>`, b => {
+      b.querySelector('[data-w="new"]').onclick = () => { closeModal(); toast('Glissez un composant depuis la colonne de droite pour commencer.'); };
+      b.querySelector('[data-w="ex"]').onclick = () => openExample(1);
+      b.querySelector('[data-w="open"]').onclick = () => { closeModal(); openProject(); };
+      b.querySelectorAll('[data-ex]').forEach(x => x.onclick = () => openExample(+x.dataset.ex));
+    });
+  }
+
   /* ================================================================ onglets, menus, raccourcis */
   function showTab(name) {
     $$('#bottom .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -9529,7 +9690,13 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     $('#bottom').classList.remove('collapsed');
     if (name === 'plot') { plotter.dirty = true; setTimeout(() => plotter.draw(), 20); }
   }
+  function setCodeOpen(open) {
+    document.body.classList.toggle('code-open', open);
+    try { localStorage.setItem('simulateurArduino.codeOpen', open ? '1' : '0'); } catch (e) { /* stockage indisponible */ }
+    setTimeout(() => { Blockly.svgResize(workspace); if (open) workspace.scrollCenter(); }, 20);
+  }
   function showCodeTab(name) {
+    setCodeOpen(true);
     $$('#code-pane .tab').forEach(t => t.classList.toggle('active', t.dataset.ctab === name));
     $$('#code-pane .ctabpane').forEach(p => p.classList.toggle('active', p.id === 'cpane-' + name));
     if (name === 'text') updateCodeView();
@@ -9557,8 +9724,7 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     $('#menu-examples').innerHTML = EXAMPLES.map((ex, i) => `<button data-ex="${i}">${esc(ex.title)}<span class="ex-desc">${esc(ex.desc)}</span></button>`).join('');
     $$('#menu-examples [data-ex]').forEach(b => b.onclick = () => {
       if (!confirm('Ouvrir cet exemple ? Le projet actuel sera remplacé (pensez à l\'enregistrer).')) return;
-      loadProject(EXAMPLES[+b.dataset.ex]);
-      toast('Exemple chargé : cliquez sur « Démarrer la simulation ».');
+      openExample(+b.dataset.ex);
     });
     $('#board-select').onchange = e => setBoard(e.target.value);
     $('#shield-check').onchange = e => setShield(e.target.checked);
@@ -9566,7 +9732,26 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     $('#btn-upload').onclick = uploadDialog;
     $('#btn-consigne').onclick = showConsigne;
     $('#btn-help').onclick = helpDialog;
-    $('#btn-sound').onclick = () => { const on = audio.toggle(); $('#btn-sound').textContent = on ? '🔊' : '🔇'; };
+    $('#btn-sound').onclick = () => {
+      const on = audio.toggle();
+      $('#btn-sound').classList.toggle('off', !on);
+      $('#btn-sound').title = 'Son des buzzers : ' + (on ? 'activé' : 'coupé');
+    };
+    $('#btn-code').onclick = () => setCodeOpen(!document.body.classList.contains('code-open'));
+    $('#code-close').onclick = () => setCodeOpen(false);
+    $('#btn-rotate').onclick = () => { if (!editor.sel) { toast('Sélectionnez d\'abord une pièce du circuit.'); return; } if (guardLock()) { stopSimForEdit(); editor.rotateSelection(); } };
+    $('#btn-delete').onclick = () => { if (!editor.sel) { toast('Sélectionnez d\'abord une pièce ou un fil.'); return; } if (guardLock()) { stopSimForEdit(); editor.deleteSelection(); } };
+    const title = $('#project-title');
+    title.onchange = () => {
+      state.project.title = title.value.trim() || 'Mon projet';
+      title.value = state.project.title;
+      document.title = state.project.title + ' — Simulateur Arduino';
+      autosave();
+    };
+    title.onkeydown = e => { if (e.key === 'Enter') title.blur(); };
+    $('#lib-cat').innerHTML = '<option value="all">Tous les composants</option>' +
+      CATALOG.groups.map(g => `<option value="${esc(g)}">${esc(GROUP_LABEL(g))}</option>`).join('');
+    $('#lib-cat').onchange = () => renderLibrary($('#lib-search').value);
     $('#modal-close').onclick = closeModal;
     $('#modal-bg').onclick = e => { if (e.target.id === 'modal-bg') closeModal(); };
     $$('#bottom .tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -9654,6 +9839,7 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
 
   /* ================================================================ démarrage */
   function init() {
+    document.body.classList.add('code-open');
     setupBlockly();
     plotter = new Plotter($('#plot'), $('#plot-legend'));
     new ResizeObserver(() => { plotter.dirty = true; plotter.draw(); }).observe($('#pane-plot'));
@@ -9673,7 +9859,14 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
     bindUI();
     renderLibrary('');
     state.project = defaultProject();
-    if (!restoreAutosave()) loadProject(EXAMPLES[1], { silent: true });
+    let codeOpen = false;
+    try { codeOpen = localStorage.getItem('simulateurArduino.codeOpen') === '1'; } catch (e) { /* stockage indisponible */ }
+    if (!restoreAutosave()) {
+      state.project = defaultProject();
+      loadProject(defaultProject(), { silent: true });
+      welcome();
+    }
+    setCodeOpen(codeOpen);
     renderMsgs();
     if (!Uploader.supported()) addMsg('Ce navigateur ne permet pas le téléversement USB : utilisez Google Chrome ou Microsoft Edge pour envoyer le programme sur une vraie carte.', 'info');
   }
@@ -9683,6 +9876,7 @@ if (typeof module !== 'undefined') module.exports = FIRMWARE;
   APP.stop = stopSim;
   APP.loadProject = p => loadProject(p, { silent: true });
   APP.serialize = serialize;
+  APP.setCodeOpen = open => setCodeOpen(open);
   APP.cpp = generateCpp;
   APP.workspace = () => workspace;
   APP.messages = messages;

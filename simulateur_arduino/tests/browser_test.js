@@ -16,6 +16,7 @@ fs.mkdirSync(shots, { recursive: true });
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto(file);
   await page.waitForFunction(() => window.APP && window.APP.state && window.APP.state.project);
+  await page.keyboard.press('Escape');   // ferme l'écran d'accueil
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(shots, '01_accueil.png') });
 
@@ -70,12 +71,14 @@ fs.mkdirSync(shots, { recursive: true });
 
   // code Arduino généré
   await page.evaluate(() => APP.loadProject(EXAMPLES[3]));
+  await page.click('#btn-code');
   await page.click('[data-ctab="text"]');
   await page.waitForTimeout(300);
   const code = await page.evaluate(() => document.querySelector('#code-view').textContent);
   check('Code .ino généré', code.includes('rgb_lcd lcd;') && code.includes('void loop()'), code.length + ' caractères');
   await page.screenshot({ path: path.join(shots, '07_code.png') });
   await page.click('[data-ctab="blocks"]');
+  await page.click('#code-close');
 
   // Nano et Mega
   for (const [i, name] of [[7, 'nano'], [0, 'uno']]) {
