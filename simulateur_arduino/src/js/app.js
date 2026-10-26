@@ -66,7 +66,27 @@
   }
 
   /* ================================================================ Blockly */
+  let themes = null;
+  function applyTheme(t) {
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem('simulateurArduino.theme', t); } catch (e) { /* stockage indisponible */ }
+    if (workspace && themes) {
+      workspace.setTheme(themes[t]);
+      // couleur de la grille des blocs
+      document.querySelectorAll('.blocklyGridPattern line, .blocklyGridPattern path').forEach(l => l.setAttribute('stroke', t === 'dark' ? '#2a3442' : '#dde3ea'));
+    }
+    if (plotter) { plotter.dirty = true; plotter.draw(); }
+  }
   function setupBlockly() {
+    const dark = Blockly.Theme.defineTheme('simuArduinoDark', {
+      base: Blockly.Themes.Classic,
+      componentStyles: {
+        workspaceBackgroundColour: '#161c25', toolboxBackgroundColour: '#1a212b', toolboxForegroundColour: '#e3e9f1',
+        flyoutBackgroundColour: '#1f2833', flyoutForegroundColour: '#e3e9f1', flyoutOpacity: 1,
+        scrollbarColour: '#3a4757', insertionMarkerColour: '#4f94ff', cursorColour: '#e3e9f1'
+      },
+      fontStyle: { family: '"Segoe UI", system-ui, sans-serif', size: 11 }
+    });
     const theme = Blockly.Theme.defineTheme('simuArduino', {
       base: Blockly.Themes.Classic,
       componentStyles: {
@@ -76,6 +96,7 @@
       },
       fontStyle: { family: '"Segoe UI", system-ui, sans-serif', size: 11 }
     });
+    themes = { light: theme, dark };
     workspace = Blockly.inject('blockly', {
       toolbox: BlocksDef.toolbox(),
       renderer: 'zelos',
@@ -277,6 +298,7 @@
   }
 
   /* ================================================================ bibliothèque */
+  const collapsed = new Set((() => { try { return JSON.parse(localStorage.getItem('simulateurArduino.libFolded') || '[]'); } catch (e) { return []; } })());
   const GROUP_LABEL = g => (g === 'Composants de base' ? 'Basiques' : g.replace('Grove – ', 'Grove : '));
   function renderLibrary(filter) {
     const list = $('#lib-list');
@@ -288,7 +310,12 @@
       if (cat !== 'all' && cat !== group && !f) continue;
       const items = CATALOG.list.filter(c => c.group === group && (!f || (c.name + ' ' + (c.desc || '') + ' ' + group).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(f)));
       if (!items.length) continue;
-      if (cat === 'all' || f) html += `<div class="lib-group-title">${esc(GROUP_LABEL(group))}</div>`;
+      const folded = !f && collapsed.has(group);
+      if (cat === 'all' || f) {
+        html += `<button class="lib-group-title${folded ? ' folded' : ''}" data-group="${esc(group)}" title="Afficher / masquer">` +
+          `<i class="arrow"></i>${esc(GROUP_LABEL(group))}<span class="count">${items.length}</span></button>`;
+      }
+      if (folded && cat === 'all') continue;
       html += '<div class="lib-items">';
       for (const c of items) {
         const support = boardSupport(c, fw328, fw2560);
@@ -369,10 +396,17 @@
       html += propsFields(comp);
     }
     html += simControls(comp);
+    const snip = safeSnippet(comp);
+    if (snip) {
+      html += `<div class="section">Exemple de code</div><p class="desc">${esc(snip.desc)}</p>
+        <button class="tb code-btn snippet-btn" data-snippet="1"><svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg> Insérer dans le programme</button>`;
+    }
     if (!editor.locked) html += `<div class="btns"><button class="mini" data-act="rot">↻ Tourner (R)</button><button class="mini danger" data-act="del">Supprimer (Suppr)</button></div>`;
     box.innerHTML = html;
     box.hidden = false;
     bindPropButtons(box);
+    const snipBtn = box.querySelector('[data-snippet]');
+    if (snipBtn) snipBtn.onclick = () => insertSnippet(comp);
     const portSel = box.querySelector('[data-port]');
     if (portSel) portSel.onchange = () => { editor.setCable(comp.id, portSel.value || null); renderProps(sel); };
     bindSimControls(box, comp);
@@ -537,6 +571,73 @@
     if (state.sim) state.sim.interact();
     editor.updateDynamic(state.sim);
     renderProps(editor.sel);
+  }
+
+  /* ================================================================ exemples de code des composants */
+  // broche de la carte reliée à une broche de pièce (directement ou à travers une résistance)
+  function componentContext(comp) {
+    const circuit = state.project.circuit;
+    const board = BOARDS[circuit.board];
+    const net = SimLib.buildNetlist(circuit);
+    const pinByNet = new Map();
+    const names = board.digitalPins().slice(0, board.analogBase).concat(board.analogPins());
+    for (const name of names) {
+      const n = net.boardNet(name);
+      if (n !== undefined && !pinByNet.has(n)) pinByNet.set(n, name);
+    }
+    const resistors = circuit.comps.filter(c => c.def && c.def.kind === 'resistor');
+    const trace = pinId => {
+      const n = net.pin(comp.id, pinId);
+      if (n === undefined) return null;
+      if (pinByNet.has(n)) return pinByNet.get(n);
+      for (const r of resistors) {
+        const a = net.pin(r.id, '1'), b = net.pin(r.id, '2');
+        if (a === n && pinByNet.has(b)) return pinByNet.get(b);
+        if (b === n && pinByNet.has(a)) return pinByNet.get(a);
+      }
+      return null;
+    };
+    const pins = {};
+    for (const p of PARTS.geometry(comp, circuit).pins) pins[p.id] = trace(p.id);
+    const cab = (circuit.cables || []).find(c => c.comp === comp.id);
+    const port = cab && circuit.shield ? cab.port : pins.SIG1 || null;
+    return { board, port, pins };
+  }
+  function safeSnippet(comp) {
+    try { return SNIPPETS.forComponent(comp, componentContext(comp)); }
+    catch (e) { console.warn(e); return null; }
+  }
+  function insertSnippet(comp) {
+    const snip = safeSnippet(comp);
+    if (!snip) return;
+    const ws = workspace;
+    const hat = type => {
+      let b = ws.getTopBlocks(true).find(x => x.type === type && x.isEnabled());
+      if (!b) {
+        b = Blockly.serialization.blocks.append({ type, x: 20, y: type === 'ard_setup' ? 20 : 220 }, ws);
+      }
+      return b;
+    };
+    const added = [];
+    Blockly.Events.setGroup(true);
+    try {
+      for (const [part, type] of [['setup', 'ard_setup'], ['loop', 'ard_loop']]) {
+        if (!snip[part] || !snip[part].length) continue;
+        const h = hat(type);
+        const first = Blockly.serialization.blocks.append(SNIPPETS.chain(snip[part]).block, ws);
+        const conn = h.getInput('DO').connection;
+        const target = conn.targetBlock();
+        const last = target ? target.lastConnectionInStack(true) : conn;
+        if (last) last.connect(first.previousConnection);
+        added.push(first);
+      }
+    } finally { Blockly.Events.setGroup(false); }
+    setCodeOpen(true);
+    showCodeTab('blocks');
+    if (added.length) {
+      setTimeout(() => { added[0].select(); ws.centerOnBlock(added[0].id); }, 60);
+    }
+    toast(`Exemple ajouté ${snip.setup && snip.setup.length && snip.loop && snip.loop.length ? 'dans « Au démarrage » et « Répéter indéfiniment »' : snip.loop && snip.loop.length ? 'à la fin de « Répéter indéfiniment »' : 'dans « Au démarrage »'}. Ctrl+Z pour annuler.`, 4500);
   }
 
   /* ================================================================ simulation */
@@ -909,6 +1010,7 @@
       $('#btn-sound').classList.toggle('off', !on);
       $('#btn-sound').title = 'Son des buzzers : ' + (on ? 'activé' : 'coupé');
     };
+    $('#btn-theme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     $('#btn-code').onclick = () => setCodeOpen(!document.body.classList.contains('code-open'));
     $('#code-close').onclick = () => setCodeOpen(false);
     $('#btn-rotate').onclick = () => { if (!editor.sel) { toast('Sélectionnez d\'abord une pièce du circuit.'); return; } if (guardLock()) { stopSimForEdit(); editor.rotateSelection(); } };
@@ -970,6 +1072,14 @@
     // bibliothèque
     $('#lib-search').oninput = e => renderLibrary(e.target.value);
     $('#lib-list').addEventListener('click', e => {
+      const title = e.target.closest('.lib-group-title');
+      if (title) {
+        const g = title.dataset.group;
+        if (collapsed.has(g)) collapsed.delete(g); else collapsed.add(g);
+        try { localStorage.setItem('simulateurArduino.libFolded', JSON.stringify([...collapsed])); } catch (err) { /* stockage indisponible */ }
+        renderLibrary($('#lib-search').value);
+        return;
+      }
       const it = e.target.closest('.lib-item');
       if (!it || !guardLock()) return;
       editor.startPlacing(it.dataset.type);
@@ -994,6 +1104,22 @@
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
     };
+    const lsp = $('#lib-splitter');
+    const setLibW = w => { document.documentElement.style.setProperty('--lib-w', w + 'px'); };
+    try { const w = +localStorage.getItem('simulateurArduino.libW'); if (w) setLibW(w); } catch (e) { /* stockage indisponible */ }
+    lsp.onmousedown = e => {
+      e.preventDefault();
+      lsp.classList.add('drag');
+      const move = ev => setLibW(Math.max(200, Math.min(window.innerWidth * 0.6, window.innerWidth - ev.clientX)));
+      const up = () => {
+        lsp.classList.remove('drag');
+        window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up);
+        try { localStorage.setItem('simulateurArduino.libW', parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lib-w'), 10)); } catch (err) { /* stockage indisponible */ }
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    };
+    lsp.ondblclick = () => { setLibW(280); try { localStorage.removeItem('simulateurArduino.libW'); } catch (e) { /* stockage indisponible */ } };
     // raccourcis clavier
     window.addEventListener('keydown', e => {
       const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || document.activeElement.closest('.blocklyWidgetDiv, #blockly');
@@ -1013,6 +1139,7 @@
   function init() {
     document.body.classList.add('code-open');
     setupBlockly();
+    applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
     plotter = new Plotter($('#plot'), $('#plot-legend'));
     new ResizeObserver(() => { plotter.dirty = true; plotter.draw(); }).observe($('#pane-plot'));
     editor = new Editor($('#circuit'), {
@@ -1049,6 +1176,9 @@
   APP.loadProject = p => loadProject(p, { silent: true });
   APP.serialize = serialize;
   APP.setCodeOpen = open => setCodeOpen(open);
+  APP.insertSnippet = comp => insertSnippet(comp);
+  APP.snippet = comp => safeSnippet(comp);
+  APP.applyTheme = t => applyTheme(t);
   APP.cpp = generateCpp;
   APP.workspace = () => workspace;
   APP.messages = messages;

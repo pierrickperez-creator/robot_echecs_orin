@@ -36,6 +36,11 @@ Le travail est sauvegardé automatiquement dans le navigateur. **Fichier > Enreg
   ou tirer le câble depuis le connecteur blanc du module jusqu'à un port.
 - Fils : cliquer sur une broche puis sur une autre (clic dans le vide = coude, Échap = annuler). Les pattes posées sur la
   plaque d'essai ou sur les connecteurs de la carte sont reliées automatiquement.
+- Le panneau **Composants** s'élargit en tirant sa poignée (double-clic : taille normale) ; la flèche devant chaque famille
+  la replie ou la déplie.
+- Dans la fiche d'un composant posé, **Insérer dans le programme** ajoute un exemple de code (blocs) déjà réglé sur le port
+  ou la broche où il est branché.
+- Le bouton lune/soleil bascule en **mode sombre**.
 - Raccourcis : `R` tourner, `Suppr` supprimer, `Ctrl+Z` / `Ctrl+Y`, `Ctrl+S` enregistrer, `F5` simulation.
 
 ### Simuler
@@ -69,6 +74,8 @@ option **Verrouiller le circuit**. Enregistrez puis distribuez le `.json` : à l
 et ne peut modifier que le programme.
 
 ![Feu tricolore sur plaque d'essai](docs/captures/feu_tricolore.png)
+
+![Mode sombre](docs/captures/mode_sombre.png)
 
 ## Composants
 

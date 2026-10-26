@@ -5,7 +5,7 @@ const path = require('path');
 const node = [
   'test_vm.js', 'test_sim.js', 'test_cpp.js', 'test_uploader.js', 'test_firmware_i2c.js', 'test_firmware_gpio.js'
 ];
-const browser = ['browser_test.js', 'browser_ui_test.js', 'browser_blocks_test.js'];
+const browser = ['browser_test.js', 'browser_ui_test.js', 'browser_blocks_test.js', 'browser_snippets_test.js'];
 
 let canBrowser = true;
 try { require.resolve('playwright'); } catch (e) { canBrowser = false; }

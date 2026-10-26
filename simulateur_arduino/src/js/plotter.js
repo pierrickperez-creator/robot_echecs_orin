@@ -63,7 +63,8 @@
       if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
       const pad = (hi - lo) * 0.08; hi += pad; lo -= pad;
       const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
-      g.strokeStyle = '#eceff1'; g.fillStyle = '#78909c'; g.font = '11px sans-serif'; g.lineWidth = 1;
+      const dark = document.documentElement.dataset.theme === 'dark';
+      g.strokeStyle = dark ? '#2a3442' : '#eceff1'; g.fillStyle = dark ? '#95a3b4' : '#78909c'; g.font = '11px sans-serif'; g.lineWidth = 1;
       for (let i = 0; i <= 4; i++) {
         const v = lo + (hi - lo) * i / 4;
         g.beginPath(); g.moveTo(L, y(v)); g.lineTo(W - 6, y(v)); g.stroke();
